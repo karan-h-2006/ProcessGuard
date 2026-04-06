@@ -1,0 +1,3 @@
+[Mon Apr  6 12:56:35 2026] SECURITY ALERT: Process 42 (systemd-journal) exceeded memory limit: 15488 kB
+[Mon Apr  6 12:56:35 2026] SECURITY ALERT: Process 256 (unattended-upgr) exceeded memory limit: 22400 kB
+[Mon Apr  6 12:56:35 2026] SECURITY ALERT: Process 341 (mysqld) exceeded memory limit: 397112 kB

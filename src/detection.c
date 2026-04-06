@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include "detection.h"
 #include "logger.h"
+#include "control.h"
 
 long max_memory_kb = 500000; // Default fallback value
 
@@ -28,5 +29,9 @@ void analyze_process(ProcessInfo *process) {
         
         // Log to file
         log_event(alert_msg);
+        
+        // --- NEW INTEGRATION CODE ---
+        // Trigger Rohan's Control Engine to pause the threat
+        enforce_action(process->pid, process->name);
     }
 }

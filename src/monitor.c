@@ -4,6 +4,7 @@
 #include <dirent.h>
 #include <ctype.h>
 #include "monitor.h"
+#include "detection.h"
 
 // Helper function to check if a folder name is a number (a PID)
 int is_numeric(const char *str) {
@@ -62,9 +63,21 @@ void scan_processes() {
             }
 
             // Print the process info (filtering out empty kernel threads for cleaner output)
+            
+                // Print the process info
             if (mem_kb > 0) {
                 printf("%-10d %-25s %ld kB\n", pid, name, mem_kb);
+                
+                // --- NEW INTEGRATION CODE ---
+                // Package the data into the struct and send it to Vikas's Engine
+                ProcessInfo info;
+                info.pid = pid;
+                strncpy(info.name, name, sizeof(info.name));
+                info.memory_kb = mem_kb;
+                
+                analyze_process(&info);
             }
+            
         }
     }
     closedir(dir);

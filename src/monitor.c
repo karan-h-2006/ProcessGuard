@@ -65,15 +65,35 @@ void scan_processes() {
             // Print the process info (filtering out empty kernel threads for cleaner output)
             
                 // Print the process info
+            // Print the process info
             if (mem_kb > 0) {
-                printf("%-10d %-25s %ld kB\n", pid, name, mem_kb);
+                // --- NEW FD COUNTING LOGIC ---
+                int fd_count = 0;
+                char fd_path[256];
+                snprintf(fd_path, sizeof(fd_path), "/proc/%d/fd", pid);
                 
-                // --- NEW INTEGRATION CODE ---
+                // You must run with sudo to read other users' fd folders!
+                DIR *fd_dir = opendir(fd_path);
+                if (fd_dir) {
+                    struct dirent *fd_entry;
+                    while ((fd_entry = readdir(fd_dir)) != NULL) {
+                        // Ignore current directory (.) and parent directory (..)
+                        if (fd_entry->d_name[0] != '.') {
+                            fd_count++;
+                        }
+                    }
+                    closedir(fd_dir);
+                }
+
+                // Update the terminal printout to show the FD count
+                printf("%-10d %-25s %ld kB\t\tFDs: %d\n", pid, name, mem_kb, fd_count);
+                
                 // Package the data into the struct and send it to Vikas's Engine
                 ProcessInfo info;
                 info.pid = pid;
                 strncpy(info.name, name, sizeof(info.name));
                 info.memory_kb = mem_kb;
+                info.fd_count = fd_count; // Store the new count
                 
                 analyze_process(&info);
             }

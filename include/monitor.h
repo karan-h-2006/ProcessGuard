@@ -6,9 +6,9 @@ typedef struct {
     int pid;
     char name[256];
     long memory_kb;
+    int fd_count; // <-- NEW: Tracks open files
 } ProcessInfo;
 
-// Function prototype so main.c knows this function exists
 void scan_processes();
 
 #endif

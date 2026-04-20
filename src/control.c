@@ -1,13 +1,14 @@
 #include <stdio.h>
 #include <signal.h>
+#include <unistd.h>
 #include "control.h"
 #include "logger.h"
 
-void enforce_action(int pid, const char *name) {
+int enforce_action(int pid, const char *name) {
     // SAFEGUARD: Never touch core system processes
     if (pid <= 100) {
         printf("[\033[0;33mSAFEGUARD\033[0m] PID %d (%s) is a system process. Action blocked.\n", pid, name);
-        return;
+        return 0;
     }
 
     // Send SIGSTOP to safely pause the process
@@ -20,7 +21,9 @@ void enforce_action(int pid, const char *name) {
         
         // Log the action
         log_event(action_msg);
+        return 1;
     } else {
         printf("[\033[0;31mERROR\033[0m] Failed to pause PID %d. Run with sudo?\n", pid);
+        return 0;
     }
 }

@@ -1,2 +1,8 @@
 processguard.log
 processguard
+
+node_modules
+web-dashboard/node_modules/
+
+live_state.json
+detection_check.o

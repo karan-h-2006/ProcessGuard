@@ -2,6 +2,6 @@
 #define CONTROL_H
 
 // Function to take action against a malicious process
-void enforce_action(int pid, const char *name);
+int enforce_action(int pid, const char *name);
 
 #endif

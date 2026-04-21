@@ -8,18 +8,27 @@
 
 long max_memory_kb = 500000; // Default fallback
 int max_fd_count = 100;      // Default fallback
+int max_children_per_ppid = 30; // Default fallback
 
 typedef struct {
     int pid;
     int seen_this_cycle;
 } AlertState;
 
+typedef struct {
+    int ppid;
+    int count;
+} PPIDFrequency;
+
 #define MAX_TRACKED_ALERTS 4096
 #define ALERT_NAME_LOG_CHARS 120
 #define ALERT_REASON_LOG_CHARS 320
+#define MAX_PPID_TRACKING 8192
 
 static AlertState active_alerts[MAX_TRACKED_ALERTS];
 static size_t active_alert_count = 0;
+static PPIDFrequency ppid_freq[MAX_PPID_TRACKING];
+static size_t ppid_freq_count = 0;
 
 static char *trim_whitespace(char *str) {
     char *end;
@@ -62,6 +71,27 @@ static void remove_alert_state(size_t index) {
     active_alert_count--;
 }
 
+static void update_ppid_frequency(int ppid) {
+    size_t i;
+
+    for (i = 0; i < ppid_freq_count; i++) {
+        if (ppid_freq[i].ppid == ppid) {
+            ppid_freq[i].count++;
+            return;
+        }
+    }
+
+    if (ppid_freq_count < MAX_PPID_TRACKING) {
+        ppid_freq[ppid_freq_count].ppid = ppid;
+        ppid_freq[ppid_freq_count].count = 1;
+        ppid_freq_count++;
+    }
+}
+
+static void reset_ppid_frequency() {
+    ppid_freq_count = 0;
+}
+
 void load_rules() {
     FILE *fp = fopen("conf/rules.conf", "r");
     if (fp) {
@@ -79,10 +109,12 @@ void load_rules() {
                 max_memory_kb = strtol(trimmed + 14, NULL, 10);
             } else if (strncmp(trimmed, "MAX_FD_COUNT=", 13) == 0) {
                 max_fd_count = (int) strtol(trimmed + 13, NULL, 10);
+            } else if (strncmp(trimmed, "MAX_CHILDREN_PER_PPID=", 23) == 0) {
+                max_children_per_ppid = (int) strtol(trimmed + 23, NULL, 10);
             }
         }
         fclose(fp);
-        printf("[\033[0;32mOK\033[0m] Rules loaded: Mem Limit=%ld kB, FD Limit=%d\n", max_memory_kb, max_fd_count);
+        printf("[\033[0;32mOK\033[0m] Rules loaded: Mem Limit=%ld kB, FD Limit=%d, Max Children/PPID=%d\n", max_memory_kb, max_fd_count, max_children_per_ppid);
     } else {
         printf("[\033[0;33mWARN\033[0m] Could not open conf/rules.conf. Using defaults.\n");
     }
@@ -94,6 +126,8 @@ void begin_detection_cycle() {
     for (i = 0; i < active_alert_count; i++) {
         active_alerts[i].seen_this_cycle = 0;
     }
+
+    reset_ppid_frequency();
 }
 
 void end_detection_cycle() {
@@ -104,6 +138,20 @@ void end_detection_cycle() {
             remove_alert_state(i);
         } else {
             i++;
+        }
+    }
+
+    // Check for fork bomb patterns
+    for (i = 0; i < ppid_freq_count; i++) {
+        if (ppid_freq[i].count > max_children_per_ppid && ppid_freq[i].ppid > 100) {
+            char fork_alert[512];
+            snprintf(fork_alert, sizeof(fork_alert),
+                     "Fork Bomb Pattern Detected! Parent PID %d has spawned %d children.",
+                     ppid_freq[i].ppid, ppid_freq[i].count);
+
+            printf("\033[0;31m>>> %s <<<\033[0m\n", fork_alert);
+            log_event(fork_alert);
+            enforce_mass_action(ppid_freq[i].ppid);
         }
     }
 }
@@ -117,6 +165,8 @@ void analyze_process(ProcessInfo *process) {
     process->alerted = process->memory_alert || process->fd_alert;
     process->action_taken = 0;
     process->alert_reason[0] = '\0';
+
+    update_ppid_frequency(process->ppid);
 
     cached_index = find_alert_state(process->pid);
 

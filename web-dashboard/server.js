@@ -95,6 +95,23 @@ server.on('close', () => {
     fs.unwatchFile(JSON_FILE_PATH, broadcastLatestPayload);
 });
 
-server.listen(3001, () => {
-    console.log('ProcessGuard Socket.io Server running on port 3001');
+const PORT = 3001;
+const ALT_PORT = 3002;
+
+server.listen(PORT, () => {
+    console.log('ProcessGuard Socket.io Server running on port', PORT);
+}).on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+        console.error(`Error: Port ${PORT} is already in use.`);
+        console.error(`To fix this, run in PowerShell:`);
+        console.error(`  Get-Process -Id (Get-NetTCPConnection -LocalPort ${PORT} -ErrorAction SilentlyContinue).OwningProcess | Stop-Process -Force`);
+        console.error(`Or try alternative port ${ALT_PORT}...`);
+
+        server.listen(ALT_PORT, () => {
+            console.log('ProcessGuard Socket.io Server running on port', ALT_PORT);
+        });
+    } else {
+        console.error('Server error:', err);
+        process.exit(1);
+    }
 });

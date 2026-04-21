@@ -6,6 +6,7 @@
 // This struct holds the data for a single process
 typedef struct {
     int pid;
+    int ppid;
     char name[256];
     long memory_kb;
     int fd_count;

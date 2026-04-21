@@ -120,6 +120,39 @@ static long read_memory_kb(int pid) {
     return mem_kb;
 }
 
+static int read_ppid(int pid) {
+    char path[256];
+    char stat_content[1024];
+    FILE *fp_stat;
+    int ppid = 0;
+
+    snprintf(path, sizeof(path), "/proc/%d/stat", pid);
+    fp_stat = fopen(path, "r");
+    if (!fp_stat) {
+        return 0;
+    }
+
+    if (fgets(stat_content, sizeof(stat_content), fp_stat)) {
+        // Format: pid (comm) state ppid ...
+        // We need the 4th space-separated field
+        char *token;
+        int field = 0;
+
+        token = strtok(stat_content, " ");
+        while (token != NULL && field < 3) {
+            field++;
+            token = strtok(NULL, " ");
+        }
+
+        if (token != NULL) {
+            ppid = atoi(token);
+        }
+    }
+
+    fclose(fp_stat);
+    return ppid;
+}
+
 static int count_open_fds(int pid, int *fd_count, int *access_denied) {
     char fd_path[256];
     DIR *fd_dir;
@@ -171,6 +204,7 @@ static int capture_processes(ProcessList *list, int *access_limited_count) {
         pid = atoi(entry->d_name);
         memset(&info, 0, sizeof(info));
         info.pid = pid;
+        info.ppid = read_ppid(pid);
 
         if (!read_process_name(pid, info.name, sizeof(info.name))) {
             continue;
@@ -212,7 +246,7 @@ static void write_snapshot_json(const ProcessList *list, int scan_number, unsign
     int action_count = 0;
 
     now = time(NULL);
-    gmtime_r(&now, &tm_now);
+    gmtime_s(&tm_now, &now);
     strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", &tm_now);
 
     for (i = 0; i < list->count; i++) {
@@ -253,6 +287,7 @@ static void write_snapshot_json(const ProcessList *list, int scan_number, unsign
 
         fprintf(json_fp, "    {\n");
         fprintf(json_fp, "      \"pid\": %d,\n", process->pid);
+        fprintf(json_fp, "      \"ppid\": %d,\n", process->ppid);
         fprintf(json_fp, "      \"name\": ");
         write_json_string(json_fp, process->name);
         fprintf(json_fp, ",\n");

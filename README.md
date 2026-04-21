@@ -1,147 +1,169 @@
 # ProcessGuard
 
-ProcessGuard is a Linux process sandbox and behavior monitoring project written in C, with a small Node.js Socket.IO bridge and a React dashboard for visualizing exported process data.
+ProcessGuard is a Linux-first OS course project that safely demonstrates three ideas together:
 
-It has two main operating modes:
+1. process monitoring through `/proc`
+2. rule-based suspicious behavior detection
+3. supervised sandbox-first execution before optional host promotion
 
-- `Monitor mode` scans live processes from `/proc`, checks them against simple security rules, logs alerts, and exports the current process state to `live_state.json`.
-- `Sandbox mode` runs a command under a strict memory limit using `setrlimit`, which is useful for demonstrating basic resource confinement.
+The project is intentionally built for safe demos first. By default it does not auto-promote sandboxed commands into normal host execution, and its bundled simulators are capped, time-bounded, and designed to clean themselves up.
 
-## Features
+## Safety First
 
-- Reads process information directly from `/proc`
-- Detects suspicious processes based on:
-  - memory usage
-  - open file descriptor count
-- Logs security alerts to `processguard.log`
-- Pauses suspicious user processes with `SIGSTOP`
-- Protects low-PID system processes from automated action
-- Exports process data to `live_state.json`
-- Streams process data to a frontend using Socket.IO
-- Includes simulator programs for memory abuse and file descriptor spam
+Use this project only in a Linux environment such as:
 
-## Architecture
+- Ubuntu in VirtualBox/VMware
+- WSL2 with a Linux distro
+- a disposable lab machine
 
-The current data flow is:
+Important safety choices already built into the code:
 
-```text
-processguard (C monitor)
-  -> live_state.json
-  -> web-dashboard/server.js
-  -> Socket.IO on port 3001
-  -> React frontend
-```
+- suspicious processes are only acted on after repeated alerts across multiple scans
+- default response mode is `pause`, not `kill`
+- ProcessGuard skips low-PID and protected processes
+- cross-user actions are blocked by default
+- sandbox review has memory, CPU, FD, file-size, and timeout limits
+- sandbox review has a forced shutdown path with `SIGTERM` followed by `SIGKILL`
+- sandbox promotion is disabled by default to avoid running the same command twice
+- simulators have hard upper bounds and automatic alarms
 
-How the pieces fit together:
+Recommended demo practice:
 
-- `processguard` scans `/proc`, evaluates rule violations, logs alerts, and writes `live_state.json`.
-- `web-dashboard/server.js` watches `live_state.json` and emits updates to connected frontend clients.
-- `frontend/` connects to `http://localhost:3001` and renders the process table and summary stats.
+- run inside a VM or WSL2
+- test only with the included simulators first
+- do not enable `SANDBOX_PROMOTE_AFTER_CLEAN=1` unless the command is safe to run twice
+- do not run the monitor as `root` unless you specifically need wider visibility
 
-## Repository Structure
+## What Changed
+
+Compared with the original version, this refactor adds:
+
+- continuous monitoring driven by configurable scan intervals
+- richer telemetry: CPU, threads, sockets, child-count, command line, uptime, memory growth
+- scored detections instead of only fixed memory and FD checks
+- persistence-aware actions so one noisy sample does not trigger enforcement immediately
+- safer and more explicit response policy: `pause`, `terminate`, or `kill`
+- ownership-aware safeguards to avoid touching protected or foreign-user processes by default
+- a supervised sandbox review stage with hard limits and force-stop logic
+- safer malware simulators with bounded resource use
+- richer dashboard data and clearer action visibility
+
+## Project Structure
 
 ```text
 ProcessGuard/
 |-- conf/               Rule configuration
-|-- include/            Header files for the C project
-|-- src/                Core ProcessGuard source files
-|-- simulators/         Test programs for suspicious behavior
-|-- web-dashboard/      Node.js + Socket.IO bridge server
-|-- frontend/           React + Vite dashboard UI
-|-- live_state.json     Generated process snapshot file
-|-- processguard.log    Generated security alert log
-`-- README.md           Project documentation
+|-- include/            Shared C headers
+|-- src/                Core monitor, detection, control, sandbox, logger
+|-- simulators/         Safe demo simulators
+|-- web-dashboard/      Socket.IO bridge for live_state.json
+|-- frontend/           React dashboard
+`-- README.md
 ```
 
-Important directories:
+Core modules:
 
-- `src/`
-  - `main.c`: entry point that switches between monitor mode and sandbox mode
-  - `monitor.c`: scans `/proc`, counts memory and file descriptors, writes JSON output
-  - `detection.c`: loads thresholds from `conf/rules.conf` and detects violations
-  - `control.c`: pauses suspicious processes with `SIGSTOP`
-  - `logger.c`: appends alerts to `processguard.log`
-  - `sandbox.c`: runs a command with a 20 MB address-space limit
-- `include/`
-  - shared headers and `ProcessInfo` struct definitions
-- `conf/`
-  - `rules.conf`: threshold values for memory and file descriptor alerts
-- `simulators/`
-  - `sim_mem.c`: simulates high memory usage
-  - `sim_fd.c`: simulates file descriptor spam
-- `web-dashboard/`
-  - `server.js`: watches `live_state.json` and broadcasts data on port `3001`
-- `frontend/`
-  - React dashboard that connects to the Socket.IO server at `http://localhost:3001`
+- `src/main.c`
+  switches between monitor mode and sandbox review mode
+- `src/monitor.c`
+  scans `/proc`, enriches process telemetry, and writes `live_state.json`
+- `src/detection.c`
+  loads rules, scores suspicious behavior, and coordinates enforcement
+- `src/control.c`
+  applies guarded pause/terminate/kill actions
+- `src/sandbox.c`
+  runs commands under a supervised sandbox review stage
+- `src/logger.c`
+  appends security events to `processguard.log`
 
-## Prerequisites
+## Detection Model
 
-ProcessGuard is designed for Linux, because it depends on the `/proc` filesystem and Linux process metadata.
+The detection engine now scores processes using multiple signals:
 
-You should have:
+- resident memory usage
+- file descriptor count
+- socket count
+- thread count
+- CPU percentage
+- rapid memory growth between scans
+- rapid file descriptor growth between scans
+- excessive child-process fan-out from one parent
 
-- Linux or a Linux environment with `/proc`
-- `gcc`
-- Node.js and `npm`
-- permission to inspect running processes
+Actions are only considered when:
 
-Recommended package examples:
+- the score crosses `MIN_ALERT_SCORE`
+- the alert persists for `ALERT_PERSISTENCE_CYCLES`
 
-```bash
-sudo apt update
-sudo apt install build-essential nodejs npm
+This helps reduce false positives from short-lived spikes.
+
+## Rule Configuration
+
+Rules live in [conf/rules.conf](/C:/Btech/sem4/IT253/project/ProcessGuard/conf/rules.conf).
+
+Key settings:
+
+```ini
+MONITOR_INTERVAL_SECONDS=2
+MAX_MEMORY_KB=500000
+MAX_FD_COUNT=128
+MAX_SOCKET_COUNT=32
+MAX_THREADS=64
+MAX_CPU_PERCENT=85
+MAX_MEMORY_GROWTH_KB=128000
+MAX_FD_GROWTH=32
+MAX_CHILDREN_PER_PPID=24
+MIN_ALERT_SCORE=40
+ALERT_PERSISTENCE_CYCLES=2
+ACTION_MODE=pause
+SANDBOX_MEMORY_KB=131072
+SANDBOX_FD_LIMIT=64
+SANDBOX_CPU_SECONDS=15
+SANDBOX_EVAL_SECONDS=8
+SANDBOX_PROMOTE_AFTER_CLEAN=0
 ```
 
-Important environment notes:
+Action policy:
 
-- The C monitor will not work correctly on native Windows because it reads `/proc/...`.
-- You may need `sudo` to inspect `/proc/<pid>/fd` for other users' processes.
-- Enforcement can fail without sufficient permissions, even if detection succeeds.
-- The frontend depends on the Socket.IO server being available on `http://localhost:3001`.
+- `pause`: safest default, uses `SIGSTOP`
+- `terminate`: sends `SIGTERM` and escalates to `SIGKILL` after the grace period
+- `kill`: immediate `SIGKILL`
 
-## Build Instructions
+## Build
 
-Run all commands from the project root unless noted otherwise.
-
-### Build the main ProcessGuard binary
+Run these commands inside Linux:
 
 ```bash
 gcc -Iinclude src/*.c -o processguard
-```
-
-### Build the simulator binaries
-
-```bash
 gcc simulators/sim_mem.c -o sim_mem
 gcc simulators/sim_fd.c -o sim_fd
+gcc simulators/sim_fork.c -o sim_fork
+gcc simulators/sim_cpu.c -o sim_cpu
+gcc simulators/sim_socket.c -o sim_socket
+gcc simulators/sim_combo.c -o sim_combo
 ```
 
-## Usage
+The C core is Linux-specific because it depends on `/proc`, `setrlimit`, Unix signals, and Linux process metadata.
 
-### 1. Monitor Mode
+## Running ProcessGuard
 
-Run ProcessGuard without extra arguments to scan current processes:
+### Monitor Mode
 
 ```bash
 ./processguard
 ```
 
-What monitor mode currently does:
+What it does:
 
-- loads rules from `conf/rules.conf`
-- performs a one-time scan of `/proc`
-- prints process information to the terminal
-- exports results to `live_state.json`
-- logs alerts to `processguard.log`
-- pauses suspicious processes when rule violations are found
+- loads `conf/rules.conf`
+- scans live processes every configured interval
+- writes `live_state.json`
+- logs events to `processguard.log`
+- scores suspicious behavior
+- applies guarded actions only after sustained alerts
 
-Important limitation:
+Stop it safely with `Ctrl+C`.
 
-- This is currently a one-shot scan, not a continuously running daemon. If you want fresh data, run `./processguard` again.
-
-### 2. Sandbox Mode
-
-Run ProcessGuard with a command to execute that command inside the sandbox:
+### Sandbox Review Mode
 
 ```bash
 ./processguard <command> [args...]
@@ -150,69 +172,177 @@ Run ProcessGuard with a command to execute that command inside the sandbox:
 Example:
 
 ```bash
-./processguard ls -l
+./processguard ./sim_mem 96 8
 ```
 
-Current sandbox behavior:
+What sandbox review does:
 
-- forks a child process
-- applies `RLIMIT_AS`
-- limits the child to `20 MB` of address space
-- runs the requested command with `execvp`
-- waits for the command to finish
+- runs the target in a restricted environment first
+- applies memory, CPU, FD, file-size, and timeout limits
+- supervises the target during the review window
+- force-stops the sandboxed process group if limits are exceeded
+- does not promote to host execution unless `SANDBOX_PROMOTE_AFTER_CLEAN=1`
 
-Important limitation:
+Important note:
 
-- The sandbox is currently a basic memory-limited launcher. It is not a full container or hardened security sandbox.
+- if you enable promotion, the command is executed again outside the sandbox after a clean review
+- only use promotion for commands that are safe to run twice
 
-## Dashboard Setup
+## Safe Simulator Programs
 
-The dashboard has two parts that must run together:
+All simulator source lives in [simulators](/C:/Btech/sem4/IT253/project/ProcessGuard/simulators).
 
-1. the Socket.IO bridge in `web-dashboard/`
-2. the React frontend in `frontend/`
+### Memory simulator
 
-### Start the Socket.IO bridge
-
-Open a terminal and run:
+Build:
 
 ```bash
-cd web-dashboard
-npm install
-node server.js
+gcc simulators/sim_mem.c -o sim_mem
 ```
 
-Expected behavior:
-
-- starts an Express/HTTP server with Socket.IO
-- listens on port `3001`
-- watches `../live_state.json`
-- emits `processData` events to connected frontend clients
-
-### Start the React frontend
-
-Open another terminal and run:
+Run:
 
 ```bash
-cd frontend
-npm install
-npm run dev
+./sim_mem
+./sim_mem 128 10
 ```
 
-Expected behavior:
+Arguments:
 
-- starts the Vite development server
-- connects to `http://localhost:3001`
-- displays process stats and a process table
+- first argument: megabytes to allocate
+- second argument: seconds to hold the allocation
 
-### Typical end-to-end workflow
+Safety caps:
 
-Use three terminals:
+- minimum 8 MB
+- maximum 192 MB
+- maximum hold time 12 seconds
+
+### File descriptor simulator
+
+Build:
+
+```bash
+gcc simulators/sim_fd.c -o sim_fd
+```
+
+Run:
+
+```bash
+./sim_fd
+./sim_fd 72 8
+```
+
+Arguments:
+
+- first argument: number of descriptors to open
+- second argument: seconds to keep them open
+
+Safety caps:
+
+- minimum 8 FDs
+- maximum 96 FDs
+- maximum hold time 12 seconds
+
+### Process family simulator
+
+Build:
+
+```bash
+gcc simulators/sim_fork.c -o sim_fork
+```
+
+Run:
+
+```bash
+./sim_fork
+./sim_fork 16 8
+```
+
+Arguments:
+
+- first argument: number of child processes
+- second argument: seconds to keep them alive
+
+Safety caps:
+
+- minimum 2 children
+- maximum 20 children
+- maximum hold time 12 seconds
+
+### CPU simulator
+
+Build:
+
+```bash
+gcc simulators/sim_cpu.c -o sim_cpu
+```
+
+Run:
+
+```bash
+./sim_cpu
+./sim_cpu 10
+```
+
+### Socket simulator
+
+Build:
+
+```bash
+gcc simulators/sim_socket.c -o sim_socket
+```
+
+Run:
+
+```bash
+./sim_socket
+./sim_socket 20 8
+```
+
+### Combo simulator
+
+Build:
+
+```bash
+gcc simulators/sim_combo.c -o sim_combo
+```
+
+Run:
+
+```bash
+./sim_combo
+./sim_combo 112 40 8
+```
+
+## Suggested Demo Flow
+
+1. Start in a Linux VM or WSL2 terminal.
+2. Build `processguard` and the simulators.
+3. Start the dashboard bridge and frontend.
+4. Launch one simulator.
+5. Start `./processguard`.
+6. Watch terminal logs, `processguard.log`, `live_state.json`, and the dashboard.
+
+Every bundled simulator now matches the detection engine in two ways:
+
+- it crosses one or more behavior thresholds
+- it carries a known demo signature so it is guaranteed to appear as an alert in the dashboard
+
+The dashboard also exposes real-time user actions for alerted processes:
+
+- `Continue` resumes the process and suppresses further automatic stopping for that PID
+- `Pause` sends it back to `SIGSTOP`
+- `Stop` sends `SIGTERM` and escalates if needed
+- `Kill` sends `SIGKILL`
+
+Example:
 
 Terminal 1:
 
 ```bash
 cd web-dashboard
+npm install
 node server.js
 ```
 
@@ -220,240 +350,72 @@ Terminal 2:
 
 ```bash
 cd frontend
+npm install
 npm run dev
 ```
 
 Terminal 3:
 
 ```bash
+./sim_mem 128 10
 ./processguard
 ```
 
-Then refresh or open the frontend in your browser. Each time you run `./processguard`, the exported `live_state.json` is updated and the dashboard can receive new data.
+## Dashboard
 
-## Rule Configuration
+The dashboard now shows:
 
-Rules are loaded from:
+- process score
+- CPU usage
+- memory and memory growth
+- FD count
+- socket count
+- thread count
+- child-process count
+- whether ProcessGuard acted
+- whether a process was protected and intentionally skipped
 
-```text
-conf/rules.conf
-```
-
-Current example:
-
-```ini
-MAX_MEMORY_KB=500000
-MAX_FD_COUNT=50
-```
-
-What these values mean:
-
-- `MAX_MEMORY_KB`: trigger an alert if a process exceeds this resident memory value
-- `MAX_FD_COUNT`: trigger an alert if a process has more open file descriptors than this limit
-
-How the engine behaves:
-
-- if either threshold is exceeded, ProcessGuard logs a threat
-- the process may then be paused with `SIGSTOP`
-- if the PID is `<= 100`, ProcessGuard refuses to act as a safeguard
-
-Fallback behavior:
-
-- if `conf/rules.conf` cannot be opened, built-in defaults are used
-- the source currently defaults to `500000` kB for memory and `100` for file descriptors
-
-## Simulator Usage
-
-The project includes two simple simulator programs for demos and testing.
-
-### Memory abuse simulator
+Bridge server:
 
 ```bash
-./sim_mem
-```
-
-Behavior:
-
-- attempts to allocate about `600 MB` of memory
-- sleeps briefly so ProcessGuard has time to detect it
-
-### File descriptor spam simulator
-
-```bash
-./sim_fd
-```
-
-Behavior:
-
-- opens `60` files rapidly using `/dev/null`
-- sleeps briefly so ProcessGuard has time to detect it
-
-### Suggested demo flow
-
-1. Build `processguard`, `sim_mem`, and `sim_fd`
-2. Start the dashboard server and frontend
-3. Run one simulator in a separate terminal
-4. Run `./processguard`
-5. Check:
-   - terminal output
-   - `processguard.log`
-   - `live_state.json`
-   - frontend dashboard updates
-
-## Generated Files
-
-### `live_state.json`
-
-Generated by monitor mode in the project root.
-
-Contains:
-
-- process ID
-- process name
-- memory usage in kB
-- open file descriptor count
-
-Used by:
-
-- `web-dashboard/server.js`
-- the React frontend, through Socket.IO updates
-
-### `processguard.log`
-
-Generated by the logger in the project root.
-
-Contains:
-
-- timestamped security alerts
-- action logs for paused processes
-
-## Safety Notes
-
-Be careful when running this project on a real Linux system.
-
-- ProcessGuard can send `SIGSTOP` to detected processes.
-- You should test with the simulator programs first.
-- Run with elevated privileges only when needed.
-- Never assume the current sandbox mode is equivalent to a production-grade isolation system.
-- The low-PID safeguard helps, but it is not a complete protection strategy.
-
-## Limitations
-
-The current implementation has a few important constraints:
-
-- Linux-only monitor behavior due to `/proc` dependency
-- one-shot monitor execution instead of continuous monitoring
-- simple threshold-based detection only
-- JSON export is rewritten on each scan
-- frontend data appears only after `live_state.json` exists
-- Socket.IO bridge watches a file rather than reading directly from the monitor process
-- sandbox mode limits memory only; it does not isolate filesystem, network, or syscalls
-
-## Troubleshooting
-
-### `live_state.json` is missing
-
-Possible causes:
-
-- `./processguard` has not been run yet
-- monitor mode failed before writing the file
-- you ran the command from an unexpected working directory
-
-What to do:
-
-- run `./processguard` from the project root
-- verify `/proc` is available
-- check terminal errors
-
-### Frontend is not receiving data
-
-Possible causes:
-
-- `web-dashboard/server.js` is not running
-- frontend is not running
-- Socket.IO server is not on port `3001`
-- `live_state.json` does not exist yet
-
-What to do:
-
-- start `node server.js` in `web-dashboard/`
-- start `npm run dev` in `frontend/`
-- run `./processguard` again to refresh `live_state.json`
-- confirm the frontend is connecting to `http://localhost:3001`
-
-### Permission denied when reading `/proc/<pid>/fd`
-
-Possible causes:
-
-- the process belongs to another user
-- the current shell lacks sufficient privileges
-
-What to do:
-
-- rerun the monitor with `sudo` if appropriate
-- test using your own simulator processes first
-
-### No threats are detected
-
-Possible causes:
-
-- thresholds in `conf/rules.conf` are too high
-- the simulator process ended before scanning
-- the process did not exceed the configured limit
-
-What to do:
-
-- reduce values in `conf/rules.conf`
-- run a simulator and quickly launch `./processguard`
-- inspect `live_state.json` to confirm the measured values
-
-### Sandbox command fails to execute
-
-Possible causes:
-
-- the command does not exist in `PATH`
-- the memory limit is too restrictive
-- `execvp` failed
-
-What to do:
-
-- try a known command such as `./processguard ls`
-- verify the command is installed
-- inspect terminal output for the execution failure message
-
-## Quick Command Reference
-
-```bash
-# Build
-gcc -Iinclude src/*.c -o processguard
-gcc simulators/sim_mem.c -o sim_mem
-gcc simulators/sim_fd.c -o sim_fd
-
-# Monitor mode
-./processguard
-
-# Sandbox mode
-./processguard ls -l
-
-# Socket.IO bridge
 cd web-dashboard
-npm install
 node server.js
+```
 
-# Frontend
+Frontend:
+
+```bash
 cd frontend
-npm install
 npm run dev
 ```
 
-## Summary
+## Generated Files
 
-ProcessGuard is a compact Linux security project for demonstrating:
+- `live_state.json`
+  latest structured process snapshot for the dashboard
+- `processguard.log`
+  timestamped alert and action log
+- `sandbox_workspace/`
+  working directory used by sandbox review for relative-path writes
 
-- process inspection using `/proc`
-- rule-based suspicious process detection
-- simple enforcement with `SIGSTOP`
-- basic sandboxed command execution
-- web-based visualization using Socket.IO and React
+## Limitations
 
-For the safest demo experience, use the included simulators first, confirm the dashboard pipeline is running, and treat the monitor as a controlled educational tool rather than a production security system.
+This is still an educational security project, not a production EDR or container runtime.
+
+Known limits:
+
+- Linux-only C core
+- sandbox review uses `setrlimit` and supervision, not full namespace/container isolation
+- there is no syscall-level policy engine
+- promotion can duplicate side effects if enabled for non-idempotent commands
+- some `/proc/<pid>/fd` reads can still be permission-limited
+
+## Good Submission Talking Points
+
+If you need to explain the project in class, highlight:
+
+- sandbox-first review before optional host execution
+- dynamic behavior scoring instead of one fixed threshold
+- safe default actions and protected-process safeguards
+- live monitoring pipeline from C core to web dashboard
+- safe malware simulation for demonstration and testing

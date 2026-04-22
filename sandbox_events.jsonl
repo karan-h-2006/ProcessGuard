@@ -1,0 +1,15 @@
+{"timestamp":"2026-04-22T18:27:49Z","stage":"review","status":"started","target":"./sim_mem","detail":"sandbox review started"}
+{"timestamp":"2026-04-22T18:27:58Z","stage":"review","status":"blocked","target":"sandbox-group","detail":"sandbox evaluation timeout"}
+{"timestamp":"2026-04-22T18:27:58Z","stage":"review","status":"failed","target":"./sim_mem","detail":"sandbox review blocked or failed"}
+{"timestamp":"2026-04-22T19:09:59Z","stage":"review","status":"started","target":"./sim_combo","detail":"sandbox review started"}
+{"timestamp":"2026-04-22T19:10:08Z","stage":"review","status":"blocked","target":"sandbox-group","detail":"sandbox evaluation timeout"}
+{"timestamp":"2026-04-22T19:10:08Z","stage":"review","status":"failed","target":"./sim_combo","detail":"sandbox review blocked or failed"}
+{"timestamp":"2026-04-22T19:21:02Z","stage":"review","status":"started","target":"./sim_mem","detail":"sandbox review started"}
+{"timestamp":"2026-04-22T19:21:11Z","stage":"review","status":"blocked","target":"sandbox-group","detail":"sandbox evaluation timeout"}
+{"timestamp":"2026-04-22T19:21:11Z","stage":"review","status":"failed","target":"./sim_mem","detail":"sandbox review blocked or failed"}
+{"timestamp":"2026-04-22T19:35:09Z","stage":"review","status":"started","target":"./sim_mem","detail":"sandbox review started"}
+{"timestamp":"2026-04-22T19:35:18Z","stage":"review","status":"blocked","target":"sandbox-group","detail":"sandbox evaluation timeout"}
+{"timestamp":"2026-04-22T19:35:18Z","stage":"review","status":"failed","target":"./sim_mem","detail":"sandbox review blocked or failed"}
+{"timestamp":"2026-04-22T19:53:54Z","stage":"review","status":"started","target":"./sim_mem","detail":"sandbox review started"}
+{"timestamp":"2026-04-22T19:54:03Z","stage":"review","status":"blocked","target":"sandbox-group","detail":"sandbox evaluation timeout"}
+{"timestamp":"2026-04-22T19:54:03Z","stage":"review","status":"failed","target":"./sim_mem","detail":"sandbox review blocked or failed"}

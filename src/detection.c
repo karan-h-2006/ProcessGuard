@@ -131,7 +131,24 @@ static ActionMode parse_action_mode(const char *value) {
     if (strcmp(value, "kill") == 0) {
         return ACTION_MODE_KILL;
     }
+    if (strcmp(value, "observe") == 0 || strcmp(value, "manual") == 0) {
+        return ACTION_MODE_OBSERVE;
+    }
     return ACTION_MODE_PAUSE;
+}
+
+static const char *action_mode_name(ActionMode mode) {
+    switch (mode) {
+        case ACTION_MODE_TERMINATE:
+            return "terminate";
+        case ACTION_MODE_KILL:
+            return "kill";
+        case ACTION_MODE_OBSERVE:
+            return "observe";
+        case ACTION_MODE_PAUSE:
+        default:
+            return "pause";
+    }
 }
 
 /* Load thresholds and policy flags from conf/rules.conf with safe defaults. */
@@ -199,14 +216,14 @@ void load_rules(void) {
 
     fclose(fp);
 
-    printf("[OK] Rules loaded: mem=%ldkB fd=%d sockets=%d threads=%d cpu=%.1f%% score>=%d action=%d\n",
+    printf("[OK] Rules loaded: mem=%ldkB fd=%d sockets=%d threads=%d cpu=%.1f%% score>=%d action=%s\n",
            rules.max_memory_kb,
            rules.max_fd_count,
            rules.max_socket_count,
            rules.max_threads,
            rules.max_cpu_percent,
            rules.min_alert_score,
-           (int) rules.action_mode);
+           action_mode_name(rules.action_mode));
 }
 
 const DetectionRules *get_rules(void) {
@@ -389,6 +406,11 @@ void analyze_process(ProcessInfo *process) {
 
     if (process->user_allowed) {
         snprintf(process->action_label, sizeof(process->action_label), "USER_ALLOWED");
+        return;
+    }
+
+    if (rules.action_mode == ACTION_MODE_OBSERVE) {
+        snprintf(process->action_label, sizeof(process->action_label), "OBSERVE");
         return;
     }
 

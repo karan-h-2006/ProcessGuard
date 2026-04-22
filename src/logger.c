@@ -23,3 +23,27 @@ void log_event(const char *message) {
 
     fclose(fp);
 }
+
+void log_sandbox_event(const char *stage, const char *status, const char *target, const char *detail) {
+    FILE *fp = fopen("sandbox_events.jsonl", "a");
+    time_t now = time(NULL);
+    struct tm tm_now;
+    char timestamp[64];
+
+    if (!fp) {
+        return;
+    }
+
+    gmtime_r(&now, &tm_now);
+    strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", &tm_now);
+
+    fprintf(fp,
+            "{\"timestamp\":\"%s\",\"stage\":\"%s\",\"status\":\"%s\",\"target\":\"%s\",\"detail\":\"%s\"}\n",
+            timestamp,
+            stage ? stage : "",
+            status ? status : "",
+            target ? target : "",
+            detail ? detail : "");
+
+    fclose(fp);
+}

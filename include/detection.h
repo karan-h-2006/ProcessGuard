@@ -6,7 +6,8 @@
 typedef enum {
     ACTION_MODE_PAUSE = 0,
     ACTION_MODE_TERMINATE = 1,
-    ACTION_MODE_KILL = 2
+    ACTION_MODE_KILL = 2,
+    ACTION_MODE_OBSERVE = 3
 } ActionMode;
 
 /* Tunable rules loaded from conf/rules.conf. */

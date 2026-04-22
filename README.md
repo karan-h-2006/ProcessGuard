@@ -57,7 +57,7 @@ ProcessGuard/
 |-- src/                Core monitor, detection, control, sandbox, logger
 |-- simulators/         Safe demo simulators
 |-- web-dashboard/      Socket.IO bridge for live_state.json
-|-- frontend/           React dashboard
+|-- processguard-ui/    React dashboard
 `-- README.md
 ```
 
@@ -140,6 +140,12 @@ gcc simulators/sim_fork.c -o sim_fork
 gcc simulators/sim_cpu.c -o sim_cpu
 gcc simulators/sim_socket.c -o sim_socket
 gcc simulators/sim_combo.c -o sim_combo
+```
+
+Or build everything at once:
+
+```bash
+make
 ```
 
 The C core is Linux-specific because it depends on `/proc`, `setrlimit`, Unix signals, and Linux process metadata.
@@ -343,22 +349,31 @@ Terminal 1:
 ```bash
 cd web-dashboard
 npm install
-node server.js
+npm run dev
 ```
+
+Then open:
+
+```text
+http://localhost:3001
+```
+
+Important:
+
+- the dashboard is now served directly by `web-dashboard`
+- if port `3001` is already busy, the server falls back to `http://localhost:3002`
 
 Terminal 2:
 
 ```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Terminal 3:
-
-```bash
 ./sim_mem 128 10
 ./processguard
+```
+
+To build all available simulator binaries before testing:
+
+```bash
+make simulators
 ```
 
 ## Dashboard
@@ -382,12 +397,7 @@ cd web-dashboard
 node server.js
 ```
 
-Frontend:
-
-```bash
-cd frontend
-npm run dev
-```
+Open the dashboard in your browser at `http://localhost:3001`.
 
 ## Generated Files
 

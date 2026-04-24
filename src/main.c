@@ -4,26 +4,25 @@
 #include "detection.h"
 #include "sandbox.h"
 
-#define MONITOR_INTERVAL_SECONDS 2U
-
 int main(int argc, char *argv[]) {
-    // If the user provided extra arguments (e.g., "./processguard ls -l")
+    const DetectionRules *rules;
+
+    load_rules();
+    rules = get_rules();
+
     if (argc > 1) {
-        printf("Initializing ProcessGuard Sandbox Mode...\n\n");
-        // Pass everything after "./processguard" to the sandbox
+        printf("Initializing ProcessGuard Sandbox Review Mode...\n");
+        printf("Sandbox evaluation window: %d seconds\n\n", rules->sandbox_eval_seconds);
         run_in_sandbox(&argv[1]);
         return 0;
     }
 
-    // Otherwise, run the standard Monitor/IDS mode
     printf("Initializing ProcessGuard Monitor Mode...\n");
-    load_rules();
     signal(SIGINT, handle_monitor_signal);
     signal(SIGTERM, handle_monitor_signal);
-    printf("Starting continuous monitoring every %u seconds.\n", MONITOR_INTERVAL_SECONDS);
+    printf("Starting continuous monitoring every %d seconds.\n", rules->monitor_interval_seconds);
     printf("Press Ctrl+C to stop monitoring gracefully.\n\n");
 
-    run_monitor_loop(MONITOR_INTERVAL_SECONDS);
-    
+    run_monitor_loop((unsigned) rules->monitor_interval_seconds);
     return 0;
 }

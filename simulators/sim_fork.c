@@ -3,49 +3,60 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
-// Simple controlled fork bomb test
-// Spawns multiple child processes to test PPID tracking
-int main() {
-    // 🛡️ THE DEAD MAN'S SWITCH: Kills the parent in 15 seconds safely.
-    alarm(15);
-
-    printf("[TEST] Starting controlled fork bomb test...\n");
-    printf("[TEST] This process will spawn 35 children to trigger the fork bomb detection\n");
-    printf("[TEST] Parent PID: %d\n", getpid());
-    
+/* Controlled process-family growth simulator with hard limits and cleanup. */
+int main(int argc, char *argv[]) {
     int children_spawned = 0;
-    int target_children = 35; // Exceeds MAX_CHILDREN_PER_PPID=30
-    
-    for (int i = 0; i < target_children; i++) {
+    int target_children = 12;
+    int hold_seconds = 8;
+    int i;
+
+    if (argc > 1) {
+        target_children = (int) strtol(argv[1], NULL, 10);
+    }
+    if (argc > 2) {
+        hold_seconds = (int) strtol(argv[2], NULL, 10);
+    }
+
+    if (target_children < 2) {
+        target_children = 2;
+    }
+    if (target_children > 20) {
+        target_children = 20;
+    }
+    if (hold_seconds < 2) {
+        hold_seconds = 2;
+    }
+    if (hold_seconds > 12) {
+        hold_seconds = 12;
+    }
+
+    alarm((unsigned) hold_seconds + 3U);
+    printf("[SIM_FORK] Parent PID %d spawning %d controlled children.\n", getpid(), target_children);
+
+    for (i = 0; i < target_children; i++) {
         pid_t pid = fork();
-        
+
         if (pid == 0) {
-            // --- CHILD PROCESS ---
-            // 🛡️ Child Dead Man's Switch: Ensures children don't become lingering orphans
-            alarm(15); 
-            
-            printf("[CHILD %d] Child PID: %d, Parent PID: %d\n", i, getpid(), getppid());
-            sleep(15); // Keep children alive just long enough for detection
-            exit(0);
-        } else if (pid < 0) {
-            // --- ERROR ---
+            alarm((unsigned) hold_seconds + 2U);
+            sleep((unsigned) hold_seconds);
+            _exit(0);
+        }
+
+        if (pid < 0) {
             perror("fork failed");
             break;
-        } else {
-            // --- PARENT PROCESS ---
-            children_spawned++;
-            printf("[PARENT] Spawned child #%d (PID: %d)\n", children_spawned, pid);
-            usleep(100000); // 0.1 second delay between forks
         }
+
+        children_spawned++;
+        usleep(80000);
     }
-    
-    printf("[TEST] Spawned %d children. Waiting for ProcessGuard detection...\n", children_spawned);
-    
-    // Wait for all children to exit or be killed
-    for (int i = 0; i < children_spawned; i++) {
+
+    printf("[SIM_FORK] Spawned %d children. Waiting for cleanup.\n", children_spawned);
+
+    for (i = 0; i < children_spawned; i++) {
         wait(NULL);
     }
-    
-    printf("[TEST] Test complete\n");
+
+    printf("[SIM_FORK] Completed safely.\n");
     return 0;
 }

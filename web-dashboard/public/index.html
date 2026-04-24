@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ProcessGuard Dashboard</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <div class="bg-glow"></div>
+
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-icon">PG</div>
+          <div>
+            <h1>PROCESS<span>GUARD</span></h1>
+            <p>Runtime Process Monitor</p>
+          </div>
+        </div>
+        <div class="status-wrap">
+          <div id="connectionStatus" class="status status-connecting">Connecting...</div>
+          <div id="lastUpdated" class="status-time"></div>
+        </div>
+      </header>
+
+      <main class="content">
+        <section>
+          <p class="section-label">System Overview</p>
+          <div id="statsGrid" class="stats-grid"></div>
+        </section>
+
+        <section>
+          <div class="section-head">
+            <p class="section-label">Sandbox Review</p>
+            <div class="meta-info">
+              <span>Shows `./processguard &lt;command&gt;` review events</span>
+            </div>
+          </div>
+          <div class="sandbox-overview">
+            <div id="sandboxSummary" class="sandbox-summary"></div>
+            <div id="sandboxLatest" class="sandbox-latest"></div>
+          </div>
+          <div class="sandbox-card">
+            <div id="sandboxEvents" class="sandbox-events">
+              <div class="empty-state">No sandbox events yet.</div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <div class="section-head">
+            <p class="section-label">Process Table</p>
+            <div id="metaInfo" class="meta-info"></div>
+          </div>
+
+          <div class="toolbar">
+            <div id="tableSummary" class="table-summary">Waiting for data...</div>
+            <input id="searchInput" class="search-input" type="text" placeholder="Filter by name or PID..." />
+          </div>
+
+          <div class="table-card">
+            <table>
+              <thead>
+                <tr>
+                  <th data-sort="pid">PID</th>
+                  <th data-sort="name">Process Name</th>
+                  <th data-sort="memory_kb">Memory</th>
+                  <th data-sort="fd_count">FD Count</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="processTableBody">
+                <tr>
+                  <td colspan="6" class="empty-state">Waiting for data...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section>
+          <div class="section-head">
+            <p class="section-label">Threat Explainability</p>
+            <div class="meta-info">
+              <span>Why a selected process was flagged and what signals contributed</span>
+            </div>
+          </div>
+          <div class="explain-card">
+            <div id="explainabilityPanel" class="explain-panel">
+              <div class="empty-state">Select a process row to inspect its risk breakdown.</div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <div class="section-head">
+            <p class="section-label">Incident Timeline</p>
+            <div class="meta-info">
+              <span>Historical alert and action trail for the selected PID</span>
+            </div>
+          </div>
+          <div class="timeline-card">
+            <div id="timelinePanel" class="timeline-panel">
+              <div class="empty-state">Select a process to inspect its incident timeline.</div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <div class="section-head">
+            <p class="section-label">Process Tree View</p>
+            <div class="meta-info">
+              <span>Ancestor chain and descendants for the selected process</span>
+            </div>
+          </div>
+          <div class="tree-card">
+            <div id="processTreePanel" class="tree-panel">
+              <div class="empty-state">Select a process to inspect its process tree.</div>
+            </div>
+          </div>
+        </section>
+
+        <section>
+          <div class="section-head">
+            <p class="section-label">Policy Profiles</p>
+            <div class="meta-info">
+              <span>Apply tuned response policies. Restart the monitor after changing profiles.</span>
+            </div>
+          </div>
+          <div id="policyProfilesPanel" class="profiles-grid">
+            <div class="empty-state">Loading policy profiles...</div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>

@@ -1,15 +1,74 @@
+# ---- Project runtime files ----
 processguard.log
-processguard
-
-node_modules
-web-dashboard/node_modules/
-
 live_state.json
-detection_check.o
-
-sandbox_workspace\artifacts
+control_actions.jsonl
 sandbox_artifacts.jsonl
 sandbox_events.jsonl
 
+# ---- Local binaries / outputs ----
+processguard
 processguard-ui
+sim_mem
+sim_fd
+sim_fork
+sim_cpu
+sim_socket
+sim_combo
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
 
+# ---- C/C++ build artifacts ----
+*.o
+*.obj
+*.lo
+*.la
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.d
+*.gcno
+*.gcda
+*.gcov
+*.prof
+*.gprof
+
+# ---- Build directories ----
+build/
+dist/
+bin/
+obj/
+Debug/
+Release/
+
+# ---- Node / web dashboard ----
+node_modules/
+web-dashboard/node_modules/
+web-dashboard/.npm/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- Sandbox workspace outputs ----
+sandbox_workspace/artifacts/
+sandbox_workspace\artifacts
+
+# ---- Environment / secrets ----
+.env
+.env.*
+!.env.example
+
+# ---- IDE / OS files ----
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

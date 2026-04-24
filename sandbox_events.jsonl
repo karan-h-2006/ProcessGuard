@@ -13,3 +13,9 @@
 {"timestamp":"2026-04-22T19:53:54Z","stage":"review","status":"started","target":"./sim_mem","detail":"sandbox review started"}
 {"timestamp":"2026-04-22T19:54:03Z","stage":"review","status":"blocked","target":"sandbox-group","detail":"sandbox evaluation timeout"}
 {"timestamp":"2026-04-22T19:54:03Z","stage":"review","status":"failed","target":"./sim_mem","detail":"sandbox review blocked or failed"}
+{"timestamp":"2026-04-24T16:35:44Z","stage":"review","status":"started","target":"./sim_mem","detail":"sandbox review started"}
+{"timestamp":"2026-04-24T16:35:53Z","stage":"review","status":"blocked","target":"sandbox-group","detail":"sandbox evaluation timeout"}
+{"timestamp":"2026-04-24T16:35:53Z","stage":"review","status":"failed","target":"./sim_mem","detail":"sandbox review blocked or failed"}
+{"timestamp":"2026-04-24T16:54:24Z","stage":"review","status":"started","target":"./sim_combo","detail":"sandbox review started"}
+{"timestamp":"2026-04-24T16:54:33Z","stage":"review","status":"blocked","target":"sandbox-group","detail":"sandbox evaluation timeout"}
+{"timestamp":"2026-04-24T16:54:33Z","stage":"review","status":"failed","target":"./sim_combo","detail":"sandbox review blocked or failed"}

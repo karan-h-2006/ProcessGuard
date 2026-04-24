@@ -6,3 +6,10 @@ web-dashboard/node_modules/
 
 live_state.json
 detection_check.o
+
+sandbox_workspace\artifacts
+sandbox_artifacts.jsonl
+sandbox_events.jsonl
+
+processguard-ui
+

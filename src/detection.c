@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <unistd.h>
 #include "detection.h"
 #include "logger.h"
 #include "control.h"
@@ -38,6 +39,59 @@ static int contains_demo_signature(const char *value) {
         if (strstr(value, signatures[i]) != NULL) {
             return 1;
         }
+    }
+
+    return 0;
+}
+
+static int is_known_protected_service_name(const char *name) {
+    static const char *protected_names[] = {
+        "systemd",
+        "init",
+        "dbus-daemon",
+        "systemd-journald",
+        "systemd-udevd",
+        "NetworkManager",
+        "sshd",
+        "cron",
+        "rsyslogd",
+        "mysqld",
+        "postgres",
+        "dockerd",
+        "containerd"
+    };
+    size_t i;
+
+    if (!name || !*name) {
+        return 0;
+    }
+
+    for (i = 0; i < sizeof(protected_names) / sizeof(protected_names[0]); i++) {
+        if (strcmp(name, protected_names[i]) == 0) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static int should_pre_mark_protected(const ProcessInfo *process) {
+    const DetectionRules *active_rules = get_rules();
+
+    if (!process) {
+        return 0;
+    }
+
+    if (process->pid <= 100 || process->pid == getpid() || process->pid == getppid()) {
+        return 1;
+    }
+
+    if (!active_rules->allow_cross_uid_action && process->uid != (unsigned int) geteuid()) {
+        return 1;
+    }
+
+    if (process->uid == 0 || process->ppid == 1 || is_known_protected_service_name(process->name)) {
+        return 1;
     }
 
     return 0;
@@ -277,6 +331,10 @@ void analyze_process(ProcessInfo *process) {
     process->action_label[0] = '\0';
     process->category[0] = '\0';
     process->alert_reason[0] = '\0';
+
+    if (should_pre_mark_protected(process)) {
+        process->protected_process = 1;
+    }
 
     history_index = find_history_index(process->pid);
     if (history_index >= 0) {

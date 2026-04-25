@@ -257,6 +257,7 @@ void analyze_process(ProcessInfo *process) {
     int history_index;
     long memory_delta = 0;
     int fd_delta = 0;
+    int direct_policy_violation = 0;
 
     process->alerted = 0;
     process->memory_alert = 0;
@@ -290,6 +291,7 @@ void analyze_process(ProcessInfo *process) {
         char detail[96];
         process->memory_alert = 1;
         process->alert_score += 40;
+        direct_policy_violation = 1;
         snprintf(detail, sizeof(detail), "memory %ldkB > %ldkB", process->memory_kb, rules.max_memory_kb);
         append_reason(process->alert_reason, sizeof(process->alert_reason), detail);
     }
@@ -298,6 +300,7 @@ void analyze_process(ProcessInfo *process) {
         char detail[96];
         process->fd_alert = 1;
         process->alert_score += 25;
+        direct_policy_violation = 1;
         snprintf(detail, sizeof(detail), "fd %d > %d", process->fd_count, rules.max_fd_count);
         append_reason(process->alert_reason, sizeof(process->alert_reason), detail);
     }
@@ -306,6 +309,7 @@ void analyze_process(ProcessInfo *process) {
         char detail[96];
         process->socket_alert = 1;
         process->alert_score += 20;
+        direct_policy_violation = 1;
         snprintf(detail, sizeof(detail), "sockets %d > %d", process->socket_count, rules.max_socket_count);
         append_reason(process->alert_reason, sizeof(process->alert_reason), detail);
     }
@@ -314,6 +318,7 @@ void analyze_process(ProcessInfo *process) {
         char detail[96];
         process->thread_alert = 1;
         process->alert_score += 20;
+        direct_policy_violation = 1;
         snprintf(detail, sizeof(detail), "threads %d > %d", process->threads, rules.max_threads);
         append_reason(process->alert_reason, sizeof(process->alert_reason), detail);
     }
@@ -322,6 +327,7 @@ void analyze_process(ProcessInfo *process) {
         char detail[96];
         process->cpu_alert = 1;
         process->alert_score += 20;
+        direct_policy_violation = 1;
         snprintf(detail, sizeof(detail), "cpu %.1f%% > %.1f%%", process->cpu_percent, rules.max_cpu_percent);
         append_reason(process->alert_reason, sizeof(process->alert_reason), detail);
     }
@@ -346,18 +352,20 @@ void analyze_process(ProcessInfo *process) {
         char detail[96];
         process->fork_alert = 1;
         process->alert_score += 35;
+        direct_policy_violation = 1;
         snprintf(detail, sizeof(detail), "children %d > %d", process->children_count, rules.max_children_per_ppid);
         append_reason(process->alert_reason, sizeof(process->alert_reason), detail);
     }
 
     if (contains_demo_signature(process->name) || contains_demo_signature(process->cmdline)) {
         process->simulation_match = 1;
-        process->alert_score += 60;
-        snprintf(process->category, sizeof(process->category), "demo-malware");
-        append_reason(process->alert_reason, sizeof(process->alert_reason), "matched bundled simulator signature");
+        snprintf(process->category, sizeof(process->category), "lab-simulator");
+        append_reason(process->alert_reason,
+                      sizeof(process->alert_reason),
+                      "matched bundled simulator signature (informational only)");
     }
 
-    process->alerted = process->alert_score >= rules.min_alert_score;
+    process->alerted = direct_policy_violation || process->alert_score >= rules.min_alert_score;
 
     if (history_index < 0 && history_count < MAX_TRACKED_PROCESSES) {
         history_index = (int) history_count;

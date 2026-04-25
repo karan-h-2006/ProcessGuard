@@ -5,7 +5,7 @@ ProcessGuard is a Linux process sandbox and behavior monitoring project written 
 It has two main operating modes:
 
 - `Monitor mode` scans live processes from `/proc`, checks them against simple security rules, logs alerts, and exports the current process state to `live_state.json`.
-- `Sandbox mode` runs a command under a strict memory limit using `setrlimit`, which is useful for demonstrating basic resource confinement.
+- `Sandbox mode` runs a command under resource limits using `setrlimit` and supervises it until it exits, which is useful for demonstrating basic resource confinement.
 
 ## Features
 
@@ -62,7 +62,7 @@ Important directories:
   - `detection.c`: loads thresholds from `conf/rules.conf` and detects violations
   - `control.c`: pauses suspicious processes with `SIGSTOP`
   - `logger.c`: appends alerts to `processguard.log`
-  - `sandbox.c`: runs a command with a 20 MB address-space limit
+- `sandbox.c`: runs a command with resource limits and live supervision
 - `include/`
   - shared headers and `ProcessInfo` struct definitions
 - `conf/`
@@ -159,10 +159,9 @@ Example:
 Current sandbox behavior:
 
 - forks a child process
-- applies `RLIMIT_AS`
-- limits the child to `20 MB` of address space
+- applies `RLIMIT_AS`, `RLIMIT_NOFILE`, and `RLIMIT_CPU`
 - runs the requested command with `execvp`
-- waits for the command to finish
+- supervises the command until it exits and blocks it only when it crosses a policy limit
 
 Important limitation:
 
@@ -275,37 +274,39 @@ The project includes three simple simulator programs for demos and testing.
 ### Memory abuse simulator
 
 ```bash
-./sim_mem
+./sim_mem safe
+./sim_mem unsafe
 ```
 
 Behavior:
 
-- attempts to allocate about `600 MB` of memory
-- sleeps briefly so ProcessGuard has time to detect it
+- `safe` stays below the configured default memory threshold
+- `unsafe` exceeds the configured threshold and should be detected
+- memory is allocated in repeated `1 MB` chunks until the target total is reached
 
 ### File descriptor spam simulator
 
 ```bash
-./sim_fd
+./sim_fd safe
+./sim_fd unsafe
 ```
 
 Behavior:
 
-- opens `60` files rapidly using `/dev/null`
-- sleeps briefly so ProcessGuard has time to detect it
+- `safe` stays below the default FD threshold
+- `unsafe` exceeds it
 
 ### Fork bomb simulator
 
 ```bash
-./sim_fork
+./sim_fork safe
+./sim_fork unsafe
 ```
 
 Behavior:
 
-- spawns `35` child processes via `fork()`
-- each child sleeps briefly to maintain detection window
-- parent waits for all children
-- triggers fork bomb detection when children count exceeds `MAX_CHILDREN_PER_PPID`
+- `safe` stays below the default child-process threshold
+- `unsafe` exceeds it
 
 **Dead Man's Switch**: All simulators include `alarm()` calls to self-terminate after a fixed duration (10-15 seconds) as a safety mechanism in case ProcessGuard fails to detect or mitigate them.
 
@@ -370,7 +371,7 @@ The current implementation has a few important constraints:
 - JSON export is rewritten on each scan
 - frontend data appears only after `live_state.json` exists
 - Socket.IO bridge watches a file rather than reading directly from the monitor process
-- sandbox mode limits memory only; it does not isolate filesystem, network, or syscalls
+- sandbox mode limits memory, CPU time, file descriptors, and output file size; it still does not isolate filesystem, network, namespaces, or syscalls
 
 ## Troubleshooting
 

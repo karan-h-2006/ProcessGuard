@@ -34,7 +34,7 @@
           <div class="section-head">
             <p class="section-label">Sandbox Review</p>
             <div class="meta-info">
-              <span>Shows `./processguard &lt;command&gt;` review events</span>
+              <span>`Blocked` means policy stopped the command. `Failed` means the command itself errored.</span>
             </div>
           </div>
           <div class="sandbox-overview">
@@ -119,18 +119,6 @@
             <div id="processTreePanel" class="tree-panel">
               <div class="empty-state">Select a process to inspect its process tree.</div>
             </div>
-          </div>
-        </section>
-
-        <section>
-          <div class="section-head">
-            <p class="section-label">Policy Profiles</p>
-            <div class="meta-info">
-              <span>Apply tuned response policies. Restart the monitor after changing profiles.</span>
-            </div>
-          </div>
-          <div id="policyProfilesPanel" class="profiles-grid">
-            <div class="empty-state">Loading policy profiles...</div>
           </div>
         </section>
       </main>

@@ -1,16 +1,40 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
 #include <unistd.h>
 #include <fcntl.h>
+
+static int equals_ignore_case(const char *left, const char *right) {
+    while (*left && *right) {
+        char a = (char) tolower((unsigned char) *left);
+        char b = (char) tolower((unsigned char) *right);
+
+        if (a != b) {
+            return 0;
+        }
+
+        left++;
+        right++;
+    }
+
+    return *left == '\0' && *right == '\0';
+}
 
 /* Safe file-descriptor burst simulator with strict upper bounds. */
 int main(int argc, char *argv[]) {
     int hold_seconds = 8;
-    int target_fds = 48;
+    int target_fds = 20;
     int *fds;
     int i;
 
-    if (argc > 1) {
+    if (argc > 1 && equals_ignore_case(argv[1], "safe")) {
+        target_fds = 20;
+        hold_seconds = 8;
+    } else if (argc > 1 && equals_ignore_case(argv[1], "unsafe")) {
+        target_fds = 72;
+        hold_seconds = 10;
+    } else if (argc > 1) {
         target_fds = (int) strtol(argv[1], NULL, 10);
     }
     if (argc > 2) {
@@ -41,7 +65,10 @@ int main(int argc, char *argv[]) {
         fds[i] = -1;
     }
 
-    printf("[SIM_FD] Opening up to %d handles for %d seconds.\n", target_fds, hold_seconds);
+    printf("[SIM_FD] Mode: %s\n",
+           target_fds <= 24 ? "safe-profile" : "unsafe-profile");
+    printf("[SIM_FD] Target open file descriptors: %d\n", target_fds);
+    printf("[SIM_FD] Hold time after opening descriptors: %d seconds\n", hold_seconds);
 
     for (i = 0; i < target_fds; i++) {
         fds[i] = open("/dev/null", O_RDONLY);

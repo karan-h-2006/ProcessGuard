@@ -14,6 +14,8 @@
     generatedAt: null,
     scanNumber: 0,
     scanIntervalSeconds: 0,
+    snapshotStatus: 'waiting',
+    snapshotAgeSeconds: null,
     lastUpdated: null,
     search: '',
     sortKey: 'memory_kb',
@@ -24,8 +26,6 @@
     sandboxArtifacts: [],
     selectedPid: null,
     timelineEvents: [],
-    policyProfiles: null,
-    profileMessage: '',
   };
 
   const statsGrid = document.getElementById('statsGrid');
@@ -41,7 +41,6 @@
   const explainabilityPanel = document.getElementById('explainabilityPanel');
   const timelinePanel = document.getElementById('timelinePanel');
   const processTreePanel = document.getElementById('processTreePanel');
-  const policyProfilesPanel = document.getElementById('policyProfilesPanel');
   const sortHeaders = document.querySelectorAll('th[data-sort]');
 
   function formatMemory(kb) {
@@ -130,6 +129,8 @@
       generatedAt: payload && payload.generated_at ? payload.generated_at : null,
       scanNumber: payload && payload.scan_number ? payload.scan_number : 0,
       scanIntervalSeconds: payload && payload.scan_interval_seconds ? payload.scan_interval_seconds : 0,
+      snapshotStatus: payload && payload.snapshot_status ? payload.snapshot_status : 'waiting',
+      snapshotAgeSeconds: payload && typeof payload.snapshot_age_seconds === 'number' ? payload.snapshot_age_seconds : null,
       lastUpdated: new Date(),
     };
   }
@@ -158,7 +159,7 @@
       case 'FAMILY_ACTION':
         return { label: 'PAUSED', className: 'status-paused' };
       case 'USER_ALLOWED':
-        return { label: 'CONTINUED', className: 'status-continued' };
+        return { label: 'ALLOWED', className: 'status-continued' };
       case 'TERMINATED':
         return { label: 'STOPPED', className: 'status-stopped' };
       case 'KILLED':
@@ -166,9 +167,9 @@
       case 'SKIPPED_PROTECTED':
         return { label: 'PROTECTED', className: 'status-protected' };
       case 'OBSERVE':
-        return { label: 'ALERT', className: 'status-alert' };
+        return { label: 'OBSERVED', className: 'status-alert' };
       case 'ACTION_FAILED':
-        return { label: 'ACTION FAILED', className: 'status-killed' };
+        return { label: 'CONTROL FAILED', className: 'status-killed' };
       default:
         if (process.alerted) {
           return {
@@ -189,7 +190,8 @@
   }
 
   function shouldShowActions(process) {
-    return Boolean(process.alerted && !process.protected_process);
+    const terminalLabels = new Set(['TERMINATED', 'KILLED', 'SKIPPED_PROTECTED']);
+    return Boolean(process.alerted && !process.protected_process && !terminalLabels.has(process.action_label));
   }
 
   function renderStats() {
@@ -218,8 +220,18 @@
       'FD Limit: ' + (state.thresholds.max_fd_count || 0),
       'FD Limited: ' + (state.summary.fd_access_limited_count || 0),
     ];
+    if (state.snapshotStatus === 'live' && typeof state.snapshotAgeSeconds === 'number') {
+      meta.push('Snapshot: live (' + state.snapshotAgeSeconds + 's old)');
+    } else if (state.snapshotStatus === 'stale') {
+      meta.push('Snapshot: stale, waiting for fresh monitor data');
+    } else {
+      meta.push('Snapshot: waiting for monitor');
+    }
+    if (state.summary.filtered_dead_count) {
+      meta.push('Dead PIDs Removed: ' + state.summary.filtered_dead_count);
+    }
     if (state.generatedAt) {
-      meta.push('Snapshot: ' + new Date(state.generatedAt).toLocaleTimeString());
+      meta.push('Generated: ' + new Date(state.generatedAt).toLocaleTimeString());
     }
 
     metaInfo.innerHTML = meta.map(function (item) { return '<span>' + item + '</span>'; }).join('');
@@ -245,12 +257,21 @@
   }
 
   function renderActions(pid, pendingAction, queuedAction) {
-    const actions = [
-      ['continue', 'Continue', 'action-continue'],
-      ['pause', 'Pause', 'action-pause'],
+    const selectedProcess = state.processes.find(function (process) { return process.pid === pid; }) || null;
+    const actions = [];
+
+    if (selectedProcess && (selectedProcess.action_label === 'PAUSED' || selectedProcess.action_label === 'FAMILY_ACTION')) {
+      actions.push(['continue', 'Continue', 'action-continue']);
+    }
+
+    if (!selectedProcess || selectedProcess.action_label !== 'PAUSED') {
+      actions.push(['pause', 'Pause', 'action-pause']);
+    }
+
+    actions.push(
       ['stop', 'Stop', 'action-stop'],
-      ['kill', 'Kill', 'action-kill'],
-    ];
+      ['kill', 'Kill', 'action-kill']
+    );
 
     const buttons = actions.map(function (action) {
       const disabled = pendingAction ? 'disabled' : '';
@@ -271,8 +292,11 @@
     tableSummary.textContent = rows.length + ' processes' + (alertCount ? ' | ' + alertCount + ' alerts' : '');
 
     if (!rows.length) {
+      const emptyMessage = state.snapshotStatus === 'stale'
+        ? 'No live rows shown because the last snapshot is stale. Restart `./processguard` to refresh the monitor feed.'
+        : (state.processes.length ? 'No matching processes' : 'Waiting for live process data...');
       tableBody.innerHTML = '<tr><td colspan="6" class="empty-state">' +
-        (state.processes.length ? 'No matching processes' : 'Waiting for data...') +
+        emptyMessage +
       '</td></tr>';
       return;
     }
@@ -350,7 +374,7 @@
       items.push({ title: 'Excessive child-process fan-out', badge: '+35', body: 'This process currently owns ' + process.children_count + ' children, which is treated as suspicious process-family expansion.' });
     }
     if (process.simulation_match) {
-      items.push({ title: 'Bundled simulator signature matched', badge: '+60', body: 'The process name or command line matches one of the built-in simulator signatures used for demonstration and testing.' });
+      items.push({ title: 'Bundled simulator identified', badge: 'Info', body: 'The process name or command line matches one of the built-in lab simulators. This tag is informational and does not raise the risk score by itself.' });
     }
     return items;
   }
@@ -441,16 +465,72 @@
 
     renderSandboxOverview();
     sandboxEvents.innerHTML = state.sandboxEvents.map(function (event) {
-      const status = String(event.status || 'unknown');
+      const verdict = getSandboxVerdict(event);
+      const status = verdict.statusClass;
       const timestamp = event.timestamp ? new Date(event.timestamp).toLocaleTimeString() : '--';
       return '<div class="sandbox-event">' +
         '<div class="sandbox-time">' + escapeHtml(timestamp) + '</div>' +
         '<div class="sandbox-stage">' + escapeHtml(event.stage || 'review') + '</div>' +
-        '<div class="sandbox-status sandbox-status-' + escapeHtml(status) + '">' + escapeHtml(status.toUpperCase()) + '</div>' +
+        '<div class="sandbox-status sandbox-status-' + escapeHtml(status) + '">' + escapeHtml(verdict.label) + '</div>' +
         '<div class="sandbox-target">' + escapeHtml(event.target || 'sandbox') + '</div>' +
-        '<div><div class="status-muted">' + escapeHtml(event.detail || '') + '</div></div>' +
+        '<div><div class="status-muted">' + escapeHtml(verdict.description + (event.detail ? ' | ' + event.detail : '')) + '</div></div>' +
       '</div>';
     }).join('');
+  }
+
+  function getSandboxVerdict(event) {
+    const status = String(event && event.status ? event.status : 'unknown').toLowerCase();
+
+    switch (status) {
+      case 'blocked':
+        return {
+          label: 'BLOCKED',
+          statusClass: 'blocked',
+          description: 'Stopped by sandbox policy because a resource or behavior limit was exceeded',
+        };
+      case 'failed':
+        return {
+          label: 'FAILED',
+          statusClass: 'failed',
+          description: 'The command itself failed to start or exited with an error inside review',
+        };
+      case 'clean':
+        return {
+          label: 'CLEAN',
+          statusClass: 'clean',
+          description: 'Completed normally inside sandbox review without crossing limits',
+        };
+      case 'completed':
+        return {
+          label: 'COMPLETED',
+          statusClass: 'completed',
+          description: 'Finished successfully after promotion to normal host execution',
+        };
+      case 'disabled':
+        return {
+          label: 'PROMOTION OFF',
+          statusClass: 'disabled',
+          description: 'Review passed, but host execution was intentionally skipped',
+        };
+      case 'started':
+        return {
+          label: 'STARTED',
+          statusClass: 'started',
+          description: 'Review or promotion phase has started',
+        };
+      case 'interrupted':
+        return {
+          label: 'INTERRUPTED',
+          statusClass: 'failed',
+          description: 'Stopped by an external signal before completion',
+        };
+      default:
+        return {
+          label: status ? status.toUpperCase() : 'UNKNOWN',
+          statusClass: status || 'unknown',
+          description: 'Sandbox event recorded',
+        };
+    }
   }
 
   function renderSandboxOverview() {
@@ -467,7 +547,7 @@
       ['Events', String(counts.total), '#22d3ee'],
       ['Commands', String(counts.commands.size), '#60a5fa'],
       ['Blocked', String(counts.blocked), counts.blocked ? '#f87171' : '#94a3b8'],
-      ['Clean', String(counts.clean), counts.clean ? '#4ade80' : '#94a3b8'],
+      ['Failed', String(counts.failed), counts.failed ? '#fb923c' : '#94a3b8'],
     ];
 
     sandboxSummary.innerHTML = '<div class="sandbox-summary-grid">' + summaryCards.map(function (card) {
@@ -479,7 +559,8 @@
 
     const latestEvent = state.sandboxEvents[0];
     const latestArtifact = state.sandboxArtifacts[0];
-    const latestStatus = String(latestEvent.status || 'unknown');
+    const verdict = getSandboxVerdict(latestEvent);
+    const latestStatus = verdict.statusClass;
     const latestTime = latestEvent.timestamp ? new Date(latestEvent.timestamp).toLocaleString() : '--';
     const artifactMeta = latestArtifact
       ? '<div class="sandbox-latest-meta">' +
@@ -498,9 +579,9 @@
 
     sandboxLatest.innerHTML =
       '<div class="sandbox-latest-label">Latest Verdict</div>' +
-      '<div class="sandbox-latest-status sandbox-status-' + escapeHtml(latestStatus) + '">' + escapeHtml(latestStatus.toUpperCase()) + '</div>' +
+      '<div class="sandbox-latest-status sandbox-status-' + escapeHtml(latestStatus) + '">' + escapeHtml(verdict.label) + '</div>' +
       '<div class="sandbox-latest-target">' + escapeHtml(latestEvent.target || 'sandbox') + '</div>' +
-      '<div class="sandbox-latest-detail">' + escapeHtml(latestEvent.detail || 'No additional detail') + '</div>' +
+      '<div class="sandbox-latest-detail">' + escapeHtml(verdict.description + (latestEvent.detail ? ' | ' + latestEvent.detail : '')) + '</div>' +
       '<div class="sandbox-latest-meta">' +
         '<span>Stage: ' + escapeHtml(latestEvent.stage || 'review') + '</span>' +
         '<span>Seen: ' + escapeHtml(latestTime) + '</span>' +
@@ -589,48 +670,6 @@
       '</div>';
   }
 
-  function renderProfileStat(label, value) {
-    return '<div class="profile-stat">' +
-      '<div class="profile-stat-label">' + escapeHtml(label) + '</div>' +
-      '<div class="profile-stat-value">' + escapeHtml(value) + '</div>' +
-    '</div>';
-  }
-
-  function renderPolicyProfiles() {
-    if (!state.policyProfiles) {
-      policyProfilesPanel.innerHTML = '<div class="empty-state">Loading policy profiles...</div>';
-      return;
-    }
-
-    const active = state.policyProfiles.active || 'custom';
-    const topMessage = state.profileMessage
-      ? '<div class="profile-card"><div class="profile-desc">' + escapeHtml(state.profileMessage) + '</div></div>'
-      : '';
-
-    const cards = state.policyProfiles.profiles.map(function (profile) {
-      const isActive = active === profile.name;
-      return '<div class="profile-card ' + (isActive ? 'profile-card-active' : '') + '">' +
-        '<div class="profile-title-row">' +
-          '<div class="profile-title">' + escapeHtml(profile.label) + '</div>' +
-          (isActive ? '<div class="profile-badge">Active</div>' : '') +
-        '</div>' +
-        '<div class="profile-desc">' + escapeHtml(profile.description) + '</div>' +
-        '<div class="profile-stats">' +
-          renderProfileStat('Action', profile.actionMode) +
-          renderProfileStat('Persistence', String(profile.persistence)) +
-          renderProfileStat('Min Score', String(profile.minAlertScore)) +
-          renderProfileStat('CPU', String(profile.thresholds.cpuPercent) + '%') +
-        '</div>' +
-        '<div class="profile-note">Applying a profile writes to conf/rules.conf. Restart ./processguard after changing it.</div>' +
-        '<div class="explain-actions">' +
-          '<button class="panel-btn ' + (isActive ? '' : 'panel-btn-primary') + '" data-policy-profile="' + profile.name + '">' + (isActive ? 'Applied' : 'Apply Profile') + '</button>' +
-        '</div>' +
-      '</div>';
-    }).join('');
-
-    policyProfilesPanel.innerHTML = topMessage + cards;
-  }
-
   function render() {
     renderStats();
     renderMeta();
@@ -639,7 +678,6 @@
     renderExplainability();
     renderTimeline();
     renderProcessTree();
-    renderPolicyProfiles();
   }
 
   async function queueAction(pid, action) {
@@ -679,35 +717,6 @@
       state.timelineEvents = [];
     }
     renderTimeline();
-  }
-
-  async function refreshPolicyProfiles(message) {
-    try {
-      const response = await fetch('/api/policy-profiles');
-      const payload = await response.json();
-      if (payload.ok) {
-        state.policyProfiles = payload;
-        state.profileMessage = message || '';
-      }
-    } catch (_error) {
-      state.profileMessage = 'Could not load policy profiles.';
-    }
-    renderPolicyProfiles();
-  }
-
-  async function applyPolicyProfile(profileName) {
-    try {
-      const response = await fetch('/api/policy-profiles/' + encodeURIComponent(profileName), { method: 'POST' });
-      const payload = await response.json();
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload && payload.error ? payload.error : 'Failed to apply profile');
-      }
-      state.policyProfiles = payload;
-      state.profileMessage = payload.message || 'Profile updated.';
-    } catch (error) {
-      state.profileMessage = 'Could not apply profile: ' + error.message;
-    }
-    renderPolicyProfiles();
   }
 
   function setConnectionStatus(status, label) {
@@ -776,22 +785,7 @@
     window.open('/api/report/' + pid + '?format=' + format, format === 'md' ? '_self' : '_blank');
   });
 
-  policyProfilesPanel.addEventListener('click', function (event) {
-    const target = event.target;
-    if (!(target instanceof HTMLElement)) {
-      return;
-    }
-
-    const profileName = target.getAttribute('data-policy-profile');
-    if (!profileName) {
-      return;
-    }
-
-    applyPolicyProfile(profileName);
-  });
-
   render();
-  refreshPolicyProfiles();
 
   const socket = window.io();
 
@@ -815,7 +809,15 @@
     state.generatedAt = nextState.generatedAt;
     state.scanNumber = nextState.scanNumber;
     state.scanIntervalSeconds = nextState.scanIntervalSeconds;
+    state.snapshotStatus = nextState.snapshotStatus;
+    state.snapshotAgeSeconds = nextState.snapshotAgeSeconds;
     state.lastUpdated = nextState.lastUpdated;
+
+    if (state.snapshotStatus === 'stale') {
+      setConnectionStatus('error', 'Stale Snapshot');
+    } else {
+      setConnectionStatus('connected', 'Live');
+    }
 
     if (state.selectedPid == null && state.processes.length) {
       state.selectedPid = state.processes[0].pid;

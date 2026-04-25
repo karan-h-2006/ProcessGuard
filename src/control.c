@@ -114,6 +114,67 @@ static int find_allowed_pid_index(int pid) {
     return -1;
 }
 
+static int read_uid_and_name_from_status(int pid, ProcessInfo *process) {
+    char path[256];
+    FILE *fp;
+    char line[256];
+
+    snprintf(path, sizeof(path), "/proc/%d/status", pid);
+    fp = fopen(path, "r");
+    if (!fp) {
+        return 0;
+    }
+
+    while (fgets(line, sizeof(line), fp)) {
+        if (strncmp(line, "Name:", 5) == 0) {
+            sscanf(line, "Name:%255s", process->name);
+        } else if (strncmp(line, "Uid:", 4) == 0) {
+            sscanf(line, "Uid:\t%u", &process->uid);
+        }
+    }
+
+    fclose(fp);
+    return 1;
+}
+
+static int load_process_identity(int pid, ProcessInfo *process) {
+    memset(process, 0, sizeof(*process));
+    process->pid = pid;
+    process->ppid = read_ppid_from_stat(pid);
+    return read_uid_and_name_from_status(pid, process);
+}
+
+static int is_known_system_service_name(const char *name) {
+    static const char *protected_names[] = {
+        "systemd",
+        "init",
+        "dbus-daemon",
+        "systemd-journald",
+        "systemd-udevd",
+        "NetworkManager",
+        "sshd",
+        "cron",
+        "rsyslogd",
+        "mysqld",
+        "postgres",
+        "dockerd",
+        "containerd"
+    };
+    size_t i;
+
+    if (!name || !*name) {
+        return 0;
+    }
+
+    for (i = 0; i < sizeof(protected_names) / sizeof(protected_names[0]); i++) {
+        if (strcmp(name, protected_names[i]) == 0) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 static void mark_pid_allowed(int pid) {
     int index = find_allowed_pid_index(pid);
 
@@ -164,6 +225,10 @@ static int is_protected_target(const ProcessInfo *process) {
     }
 
     if (!rules->allow_cross_uid_action && process->uid != current_uid) {
+        return 1;
+    }
+
+    if (process->uid == 0 || process->ppid == 1 || is_known_system_service_name(process->name)) {
         return 1;
     }
 
@@ -293,8 +358,23 @@ static UserAction parse_user_action(const char *value) {
 static void apply_user_action(int pid, UserAction action) {
     char log_line[256];
     int success = 1;
+    ProcessInfo target_process;
 
     if (pid <= 0) {
+        return;
+    }
+
+    if (!pid_is_live(pid) || !load_process_identity(pid, &target_process)) {
+        snprintf(log_line, sizeof(log_line), "USER ACTION pid=%d action=IGNORED success=0 reason=process-not-live", pid);
+        printf("[ERROR] %s\n", log_line);
+        log_event(log_line);
+        return;
+    }
+
+    if (is_protected_target(&target_process)) {
+        snprintf(log_line, sizeof(log_line), "USER ACTION pid=%d action=IGNORED success=0 reason=protected-target", pid);
+        printf("[SAFEGUARD] %s\n", log_line);
+        log_event(log_line);
         return;
     }
 

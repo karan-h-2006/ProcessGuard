@@ -13,102 +13,9 @@ const CONTROL_QUEUE_PATH = path.join(__dirname, '../control_actions.jsonl');
 const SANDBOX_EVENTS_PATH = path.join(__dirname, '../sandbox_events.jsonl');
 const SANDBOX_ARTIFACTS_PATH = path.join(__dirname, '../sandbox_artifacts.jsonl');
 const SANDBOX_ARTIFACT_DIR = path.join(__dirname, '../sandbox_workspace/artifacts');
-const RULES_FILE_PATH = path.join(__dirname, '../conf/rules.conf');
 const PROCESS_LOG_PATH = path.join(__dirname, '../processguard.log');
 const WATCH_INTERVAL_MS = 1000;
 const STATIC_DIR = path.join(__dirname, 'public');
-const RULE_KEYS = [
-  'POLICY_PROFILE',
-  'MAX_MEMORY_KB',
-  'MAX_FD_COUNT',
-  'MAX_SOCKET_COUNT',
-  'MAX_THREADS',
-  'MAX_CPU_PERCENT',
-  'MAX_MEMORY_GROWTH_KB',
-  'MAX_FD_GROWTH',
-  'MAX_CHILDREN_PER_PPID',
-  'MIN_ALERT_SCORE',
-  'ALERT_PERSISTENCE_CYCLES',
-  'ACTION_MODE',
-  'TERMINATE_GRACE_MS',
-  'ALLOW_CROSS_UID_ACTION',
-  'SANDBOX_MEMORY_KB',
-  'SANDBOX_FD_LIMIT',
-  'SANDBOX_CPU_SECONDS',
-  'SANDBOX_EVAL_SECONDS',
-  'SANDBOX_PROMOTE_AFTER_CLEAN',
-];
-const POLICY_PROFILES = {
-  'lab-safe': {
-    label: 'Lab Safe',
-    description: 'Manual investigation mode. Alerts stay visible and operator approval is required for actions.',
-    updates: {
-      POLICY_PROFILE: 'lab-safe',
-      ACTION_MODE: 'observe',
-      ALERT_PERSISTENCE_CYCLES: 1,
-      MAX_MEMORY_KB: 98304,
-      MAX_FD_COUNT: 36,
-      MAX_SOCKET_COUNT: 32,
-      MAX_THREADS: 18,
-      MAX_CPU_PERCENT: 45,
-      MAX_MEMORY_GROWTH_KB: 32768,
-      MAX_FD_GROWTH: 12,
-      MAX_CHILDREN_PER_PPID: 8,
-      MIN_ALERT_SCORE: 40,
-      SANDBOX_MEMORY_KB: 131072,
-      SANDBOX_FD_LIMIT: 64,
-      SANDBOX_CPU_SECONDS: 15,
-      SANDBOX_EVAL_SECONDS: 8,
-      SANDBOX_PROMOTE_AFTER_CLEAN: 0,
-    },
-  },
-  balanced: {
-    label: 'Balanced',
-    description: 'Safer auto-response profile for sustained suspicious behavior with a pause-first policy.',
-    updates: {
-      POLICY_PROFILE: 'balanced',
-      ACTION_MODE: 'pause',
-      ALERT_PERSISTENCE_CYCLES: 2,
-      MAX_MEMORY_KB: 131072,
-      MAX_FD_COUNT: 48,
-      MAX_SOCKET_COUNT: 40,
-      MAX_THREADS: 24,
-      MAX_CPU_PERCENT: 60,
-      MAX_MEMORY_GROWTH_KB: 49152,
-      MAX_FD_GROWTH: 16,
-      MAX_CHILDREN_PER_PPID: 10,
-      MIN_ALERT_SCORE: 50,
-      SANDBOX_MEMORY_KB: 131072,
-      SANDBOX_FD_LIMIT: 64,
-      SANDBOX_CPU_SECONDS: 15,
-      SANDBOX_EVAL_SECONDS: 8,
-      SANDBOX_PROMOTE_AFTER_CLEAN: 0,
-    },
-  },
-  strict: {
-    label: 'Strict',
-    description: 'Aggressive policy for high-risk lab scenarios with lower thresholds and terminate-first response.',
-    updates: {
-      POLICY_PROFILE: 'strict',
-      ACTION_MODE: 'terminate',
-      ALERT_PERSISTENCE_CYCLES: 1,
-      MAX_MEMORY_KB: 65536,
-      MAX_FD_COUNT: 24,
-      MAX_SOCKET_COUNT: 24,
-      MAX_THREADS: 12,
-      MAX_CPU_PERCENT: 35,
-      MAX_MEMORY_GROWTH_KB: 16384,
-      MAX_FD_GROWTH: 8,
-      MAX_CHILDREN_PER_PPID: 5,
-      MIN_ALERT_SCORE: 35,
-      SANDBOX_MEMORY_KB: 98304,
-      SANDBOX_FD_LIMIT: 48,
-      SANDBOX_CPU_SECONDS: 10,
-      SANDBOX_EVAL_SECONDS: 6,
-      SANDBOX_PROMOTE_AFTER_CLEAN: 0,
-    },
-  },
-};
 
 app.use(express.json());
 app.use(express.static(STATIC_DIR));
@@ -142,11 +49,82 @@ let latestPayload = {
     alert_count: 0,
     action_count: 0,
     fd_access_limited_count: 0,
+    filtered_dead_count: 0,
+    stale_process_count: 0,
   },
   processes: [],
+  snapshot_age_seconds: null,
+  snapshot_status: 'waiting',
 };
 let latestSandboxEvents = [];
 let latestSandboxArtifacts = [];
+
+function canInspectLinuxProc() {
+  return process.platform === 'linux' && fs.existsSync('/proc');
+}
+
+function readLinuxProcessState(pid) {
+  const statusPath = `/proc/${pid}/status`;
+
+  if (!canInspectLinuxProc() || !fs.existsSync(statusPath)) {
+    return null;
+  }
+
+  try {
+    const lines = fs.readFileSync(statusPath, 'utf8').split(/\r?\n/);
+    for (const line of lines) {
+      if (line.startsWith('State:')) {
+        const match = line.match(/^State:\s+([A-Z])/);
+        return match ? match[1] : null;
+      }
+    }
+  } catch (_error) {
+    return null;
+  }
+
+  return null;
+}
+
+function pidIsLive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0 || !canInspectLinuxProc()) {
+    return true;
+  }
+
+  const procDir = `/proc/${pid}`;
+  if (!fs.existsSync(procDir)) {
+    return false;
+  }
+
+  const stateCode = readLinuxProcessState(pid);
+  return stateCode !== 'Z' && stateCode !== 'X';
+}
+
+function computeSnapshotAgeSeconds(generatedAt) {
+  if (!generatedAt) {
+    return null;
+  }
+
+  const generatedTime = new Date(generatedAt).getTime();
+  if (!Number.isFinite(generatedTime)) {
+    return null;
+  }
+
+  return Math.max(0, Math.round((Date.now() - generatedTime) / 1000));
+}
+
+function deriveSnapshotStatus(generatedAt, intervalSeconds) {
+  const ageSeconds = computeSnapshotAgeSeconds(generatedAt);
+
+  if (ageSeconds == null) {
+    return { ageSeconds: null, status: 'waiting' };
+  }
+
+  if (ageSeconds > Math.max((Number(intervalSeconds) || 0) * 3, 8)) {
+    return { ageSeconds, status: 'stale' };
+  }
+
+  return { ageSeconds, status: 'live' };
+}
 
 function readJsonLines(filePath, limit = 20) {
   if (!fs.existsSync(filePath)) {
@@ -171,89 +149,6 @@ function loadRecentSandboxEvents() {
 
 function loadRecentSandboxArtifacts() {
   return readJsonLines(SANDBOX_ARTIFACTS_PATH, 20).reverse();
-}
-
-function parseRulesFile() {
-  if (!fs.existsSync(RULES_FILE_PATH)) {
-    return {};
-  }
-
-  const result = {};
-  const lines = fs.readFileSync(RULES_FILE_PATH, 'utf8').split(/\r?\n/);
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#') || !trimmed.includes('=')) {
-      continue;
-    }
-
-    const separatorIndex = trimmed.indexOf('=');
-    const key = trimmed.slice(0, separatorIndex);
-    const value = trimmed.slice(separatorIndex + 1);
-    result[key] = value;
-  }
-
-  return result;
-}
-
-function getPolicyProfilePayload() {
-  const rules = parseRulesFile();
-  const active = rules.POLICY_PROFILE || 'custom';
-  return {
-    active,
-    restartRequired: true,
-    profiles: Object.entries(POLICY_PROFILES).map(([name, profile]) => ({
-      name,
-      label: profile.label,
-      description: profile.description,
-      actionMode: profile.updates.ACTION_MODE,
-      minAlertScore: Number(profile.updates.MIN_ALERT_SCORE),
-      persistence: Number(profile.updates.ALERT_PERSISTENCE_CYCLES),
-      thresholds: {
-        memoryKb: Number(profile.updates.MAX_MEMORY_KB),
-        fdCount: Number(profile.updates.MAX_FD_COUNT),
-        sockets: Number(profile.updates.MAX_SOCKET_COUNT),
-        threads: Number(profile.updates.MAX_THREADS),
-        cpuPercent: Number(profile.updates.MAX_CPU_PERCENT),
-      },
-    })),
-    currentRules: rules,
-  };
-}
-
-function applyPolicyProfile(profileName) {
-  const profile = POLICY_PROFILES[profileName];
-  if (!profile) {
-    return false;
-  }
-
-  const existingLines = fs.existsSync(RULES_FILE_PATH)
-    ? fs.readFileSync(RULES_FILE_PATH, 'utf8').split(/\r?\n/)
-    : [];
-  const pendingKeys = new Set(RULE_KEYS);
-  const nextLines = existingLines.map((line) => {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#') || !trimmed.includes('=')) {
-      return line;
-    }
-
-    const separatorIndex = trimmed.indexOf('=');
-    const key = trimmed.slice(0, separatorIndex);
-    if (!(key in profile.updates)) {
-      return line;
-    }
-
-    pendingKeys.delete(key);
-    return `${key}=${profile.updates[key]}`;
-  });
-
-  for (const key of pendingKeys) {
-    if (key in profile.updates) {
-      nextLines.push(`${key}=${profile.updates[key]}`);
-    }
-  }
-
-  fs.writeFileSync(RULES_FILE_PATH, `${nextLines.join('\n').trim()}\n`, 'utf8');
-  return true;
 }
 
 function loadTimelineForPid(pid) {
@@ -347,31 +242,66 @@ function buildMarkdownReport(pid) {
 }
 
 function normalizePayload(payload) {
+  const mergedPayload = Array.isArray(payload)
+    ? {
+        ...latestPayload,
+        processes: payload,
+        summary: {
+          ...latestPayload.summary,
+        },
+      }
+    : {
+        ...latestPayload,
+        ...payload,
+        thresholds: {
+          ...latestPayload.thresholds,
+          ...(payload.thresholds || {}),
+        },
+        summary: {
+          ...latestPayload.summary,
+          ...(payload.summary || {}),
+        },
+        processes: Array.isArray(payload.processes) ? payload.processes : [],
+      };
+  const snapshotMeta = deriveSnapshotStatus(mergedPayload.generated_at, mergedPayload.scan_interval_seconds);
+  const baseProcesses = Array.isArray(mergedPayload.processes) ? mergedPayload.processes : [];
+  const liveProcesses = canInspectLinuxProc()
+    ? baseProcesses.filter((process) => pidIsLive(Number(process.pid)))
+    : baseProcesses;
+  const filteredDeadCount = Math.max(0, baseProcesses.length - liveProcesses.length);
+  const staleProcessCount = snapshotMeta.status === 'stale' ? liveProcesses.length : 0;
+  const exportedProcesses = snapshotMeta.status === 'stale' ? [] : liveProcesses;
+
   if (Array.isArray(payload)) {
     return {
-      ...latestPayload,
-      processes: payload,
+      ...mergedPayload,
+      processes: exportedProcesses,
       summary: {
-        ...latestPayload.summary,
-        process_count: payload.length,
-        alert_count: payload.filter((process) => process.alerted).length,
-        action_count: payload.filter((process) => process.action_taken).length,
+        ...mergedPayload.summary,
+        process_count: exportedProcesses.length,
+        alert_count: exportedProcesses.filter((process) => process.alerted).length,
+        action_count: exportedProcesses.filter((process) => process.action_taken).length,
+        filtered_dead_count: filteredDeadCount,
+        stale_process_count: staleProcessCount,
       },
+      snapshot_age_seconds: snapshotMeta.ageSeconds,
+      snapshot_status: snapshotMeta.status,
     };
   }
 
   return {
-    ...latestPayload,
-    ...payload,
-    thresholds: {
-      ...latestPayload.thresholds,
-      ...(payload.thresholds || {}),
-    },
+    ...mergedPayload,
     summary: {
-      ...latestPayload.summary,
-      ...(payload.summary || {}),
+      ...mergedPayload.summary,
+      process_count: exportedProcesses.length,
+      alert_count: exportedProcesses.filter((process) => process.alerted).length,
+      action_count: exportedProcesses.filter((process) => process.action_taken).length,
+      filtered_dead_count: filteredDeadCount,
+      stale_process_count: staleProcessCount,
     },
-    processes: Array.isArray(payload.processes) ? payload.processes : [],
+    processes: exportedProcesses,
+    snapshot_age_seconds: snapshotMeta.ageSeconds,
+    snapshot_status: snapshotMeta.status,
   };
 }
 
@@ -415,6 +345,8 @@ app.get('/health', (_req, res) => {
   res.json({
     ok: true,
     generated_at: latestPayload.generated_at,
+    snapshot_status: latestPayload.snapshot_status,
+    snapshot_age_seconds: latestPayload.snapshot_age_seconds,
     process_count: latestPayload.summary.process_count,
     alert_count: latestPayload.summary.alert_count,
     action_count: latestPayload.summary.action_count,
@@ -446,27 +378,6 @@ app.get('/api/timeline/:pid', (req, res) => {
     ok: true,
     pid,
     events: loadTimelineForPid(pid),
-  });
-});
-
-app.get('/api/policy-profiles', (_req, res) => {
-  res.json({
-    ok: true,
-    ...getPolicyProfilePayload(),
-  });
-});
-
-app.post('/api/policy-profiles/:name', (req, res) => {
-  const name = String(req.params.name || '').trim().toLowerCase();
-  if (!applyPolicyProfile(name)) {
-    res.status(404).json({ ok: false, error: 'Unknown profile' });
-    return;
-  }
-
-  res.json({
-    ok: true,
-    message: 'Profile written to conf/rules.conf. Restart the monitor to apply it.',
-    ...getPolicyProfilePayload(),
   });
 });
 
@@ -512,6 +423,18 @@ app.post('/api/actions', (req, res) => {
 
   if (!allowedActions.has(action)) {
     res.status(400).json({ ok: false, error: 'Invalid action' });
+    return;
+  }
+
+  latestPayload = loadPayload();
+  const process = findProcessByPid(pid);
+  if (!process) {
+    res.status(404).json({ ok: false, error: 'PID is not present in the current live snapshot' });
+    return;
+  }
+
+  if (process.protected_process) {
+    res.status(409).json({ ok: false, error: 'Protected system processes cannot be controlled from the dashboard' });
     return;
   }
 

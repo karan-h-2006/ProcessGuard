@@ -3,24 +3,51 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <ctype.h>
+
+static int equals_ignore_case(const char *left, const char *right) {
+    while (*left && *right) {
+        char a = (char) tolower((unsigned char) *left);
+        char b = (char) tolower((unsigned char) *right);
+
+        if (a != b) {
+            return 0;
+        }
+
+        left++;
+        right++;
+    }
+
+    return *left == '\0' && *right == '\0';
+}
 
 /* Combined simulator that triggers memory and FD rules together. */
 int main(int argc, char *argv[]) {
-    int hold_seconds = 8;
-    long megabytes = 112;
-    int target_fds = 40;
+    int hold_seconds = 5;
+    long megabytes = 64;
+    int target_fds = 20;
     char **chunks;
     int *fds;
     int i;
 
-    if (argc > 1) {
+    if (argc > 1 && equals_ignore_case(argv[1], "safe")) {
+        megabytes = 64;
+        target_fds = 20;
+        hold_seconds = 5;
+    } else if (argc > 1 && equals_ignore_case(argv[1], "unsafe")) {
+        megabytes = 112;
+        target_fds = 48;
+        hold_seconds = 8;
+    } else if (argc > 1) {
         megabytes = strtol(argv[1], NULL, 10);
     }
-    if (argc > 2) {
+    if (argc > 2 && !equals_ignore_case(argv[1], "safe") && !equals_ignore_case(argv[1], "unsafe")) {
         target_fds = (int) strtol(argv[2], NULL, 10);
     }
-    if (argc > 3) {
+    if (argc > 3 && !equals_ignore_case(argv[1], "safe") && !equals_ignore_case(argv[1], "unsafe")) {
         hold_seconds = (int) strtol(argv[3], NULL, 10);
+    } else if (argc > 2 && (equals_ignore_case(argv[1], "safe") || equals_ignore_case(argv[1], "unsafe"))) {
+        hold_seconds = (int) strtol(argv[2], NULL, 10);
     }
 
     if (megabytes < 32) {
@@ -56,6 +83,8 @@ int main(int argc, char *argv[]) {
         fds[i] = -1;
     }
 
+    printf("[SIM_COMBO] Mode: %s\n",
+           (megabytes <= 64 && target_fds <= 24) ? "safe-profile" : "unsafe-profile");
     printf("[SIM_COMBO] Allocating %ld MB and opening %d FDs for %d seconds.\n",
            megabytes, target_fds, hold_seconds);
 

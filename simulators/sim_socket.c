@@ -3,15 +3,39 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <string.h>
+#include <ctype.h>
+
+static int equals_ignore_case(const char *left, const char *right) {
+    while (*left && *right) {
+        char a = (char) tolower((unsigned char) *left);
+        char b = (char) tolower((unsigned char) *right);
+
+        if (a != b) {
+            return 0;
+        }
+
+        left++;
+        right++;
+    }
+
+    return *left == '\0' && *right == '\0';
+}
 
 /* Safe socket flood simulator using local socketpairs only. */
 int main(int argc, char *argv[]) {
-    int hold_seconds = 8;
-    int target_pairs = 20;
+    int hold_seconds = 5;
+    int target_pairs = 12;
     int (*pairs)[2];
     int i;
 
-    if (argc > 1) {
+    if (argc > 1 && equals_ignore_case(argv[1], "safe")) {
+        target_pairs = 12;
+        hold_seconds = 5;
+    } else if (argc > 1 && equals_ignore_case(argv[1], "unsafe")) {
+        target_pairs = 20;
+        hold_seconds = 8;
+    } else if (argc > 1) {
         target_pairs = (int) strtol(argv[1], NULL, 10);
     }
     if (argc > 2) {
@@ -38,7 +62,10 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    printf("[SIM_SOCKET] Opening %d socket pairs for %d seconds.\n", target_pairs, hold_seconds);
+    printf("[SIM_SOCKET] Mode: %s\n",
+           target_pairs <= 12 ? "safe-profile" : "unsafe-profile");
+    printf("[SIM_SOCKET] Opening %d socket pairs (%d sockets total) for %d seconds.\n",
+           target_pairs, target_pairs * 2, hold_seconds);
 
     for (i = 0; i < target_pairs; i++) {
         if (socketpair(AF_UNIX, SOCK_STREAM, 0, pairs[i]) != 0) {

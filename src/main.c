@@ -12,7 +12,8 @@ int main(int argc, char *argv[]) {
 
     if (argc > 1) {
         printf("Initializing ProcessGuard Sandbox Review Mode...\n");
-        printf("Sandbox evaluation window: %d seconds\n\n", rules->sandbox_eval_seconds);
+        printf("Sandbox supervision remains active until the command exits.\n");
+        printf("Sandbox review checkpoint: %d seconds\n\n", rules->sandbox_eval_seconds);
         run_in_sandbox(&argv[1]);
         return 0;
     }
